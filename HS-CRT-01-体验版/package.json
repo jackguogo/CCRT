@@ -1,0 +1,27 @@
+{
+  "name": "hs-crt-01-trial",
+  "version": "1.0.0",
+  "private": true,
+  "description": "认知功能障碍评估与训练软件（HS-CRT-01）体验版 —— 对应 LBYH-PRD-001 / LBYH-SRS-002 / LBYH-TDD-003",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.3.0",
+    "echarts": "^6.1.0",
+    "element-plus": "^2.14.7",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.56.0",
+    "qrcode-generator": "^1.4.4"
+  }
+}

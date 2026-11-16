@@ -1,0 +1,19 @@
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+*.log
+
+# 依赖
+node_modules/
+__pycache__/
+*.pyc
+
+# 体验版运行时数据（数据库、备份、导出）
+HS-CRT-01-体验版/data/*.db
+HS-CRT-01-体验版/data/*.db-wal
+HS-CRT-01-体验版/data/*.db-shm
+HS-CRT-01-体验版/data/backups/
+HS-CRT-01-体验版/data/exports/
+
+# WorkBuddy 会话与记忆数据（非代码，不纳入版本库）
+.workbuddy-ai/

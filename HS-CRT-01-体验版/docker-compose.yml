@@ -1,0 +1,28 @@
+# HS-CRT-01 体验版｜医生端单端上线
+# 用法：cd 到本目录后  docker compose up -d --build
+# 本期只把医生端 3211 映射到宿主机 127.0.0.1，由宝塔 Nginx 反代对外。
+# 3210 / 3212 在容器内仍监听，但宿主机不可达，公网自然访问不到。
+services:
+  app:
+    build:
+      context: .
+    container_name: hs-crt-01
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT_ADMIN: "3210"
+      PORT_DOCTOR: "3211"
+      PORT_PATIENT: "3212"
+    ports:
+      - "127.0.0.1:3211:3211"
+    volumes:
+      - hscrt01-data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3211/api/v1/entry',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  hscrt01-data:

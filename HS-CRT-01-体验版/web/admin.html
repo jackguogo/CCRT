@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>管理端 · 认知功能障碍评估与训练软件 HS-CRT-01</title>
+<link rel="stylesheet" href="/vendor/element-plus.css"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/theme.css">
+<style>[v-cloak]{display:none}
+.el-menu-item{user-select:none}
+.mini-chart{height:190px}
+.act-row{display:flex;gap:10px;padding:9px 0;border-bottom:1px dashed var(--c-line);font-size:12.5px}
+.act-row:last-child{border-bottom:none}
+.act-row .tm{color:var(--c-text-3);font-family:var(--font-num);width:120px;flex-shrink:0}
+.act-row .who{width:76px;flex-shrink:0;color:var(--c-text-2)}
+.act-row .ac{width:88px;flex-shrink:0;font-weight:600}
+.act-row .dt{flex:1;color:var(--c-text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.filter-line{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.filter-line+.filter-line{margin-top:9px}
+.dict-body{display:grid;grid-template-columns:212px 1fr;gap:14px;align-items:start}
+.dict-nav{border:1px solid var(--c-line);border-radius:10px;overflow:hidden;background:#fff}
+.dict-nav-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px 8px 12px;
+  border-bottom:1px solid var(--c-line);background:var(--c-surface-2)}
+.dict-nav-head .t{font-size:12.5px;font-weight:600;color:var(--c-text);white-space:nowrap;flex-shrink:0}
+.dict-nav button{display:flex;align-items:center;gap:7px;width:100%;text-align:left;border:none;background:none;
+  padding:10px 12px;font-size:13px;color:var(--c-text-2);cursor:pointer;border-left:2px solid transparent;font-family:inherit}
+.dict-nav button+button{border-top:1px solid var(--c-line-2)}
+.dict-nav button:hover{background:var(--c-surface-2)}
+.dict-nav button.on{background:var(--c-primary-soft);color:var(--c-primary);border-left-color:var(--c-primary);font-weight:600}
+.dict-nav button .dn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dict-nav button .dc{font-family:var(--font-num);font-size:11px;color:var(--c-text-3)}
+.dsc{font-size:10.5px;line-height:1.6;padding:0 5px;border-radius:4px;background:var(--c-surface-2);
+  color:var(--c-text-3);flex-shrink:0;white-space:nowrap}
+</style></head><body>
+<div id="app" v-cloak></div>
+<script src="/vendor/vue.global.prod.js"></script>
+<script src="/vendor/element-plus.full.min.js"></script>
+<script src="/vendor/element-icons.iife.min.js"></script>
+<script src="/vendor/element-zh-cn.min.js"></script>
+<script src="/vendor/echarts.min.js"></script>
+<script src="/icons.js"></script>
+<script>
+/* ============================================================================
+   管理端 —— 工作台 / 用户管理 / 数据管理 / 系统设置
+   对应 SRS FR-A（用户与权限）、FR-C（数据管理、导出、备份）
+   ========================================================================== */
+const { createApp, ref, reactive, computed, onMounted, nextTick, watch } = Vue;
+const El = ElementPlus;
+const msg = El.ElMessage, mbx = El.ElMessageBox;
+
+const MENU = [
+  { group: "用户管理", items: [{ k: "doctors", n: "医生管理", i: "User" }, { k: "patients", n: "患者管理", i: "Avatar" }] },
+  { group: "数据管理", items: [{ k: "assess", n: "评估数据", i: "Tickets" }, { k: "train", n: "训练记录", i: "Histogram" }] },
+  { group: "系统设置", items: [{ k: "accounts", n: "用户管理", i: "UserFilled" }, { k: "roles", n: "角色管理", i: "Lock" }, { k: "dict", n: "字典管理", i: "Collection" }, { k: "catalog", n: "项目配置", i: "Files" }] },
+];
+const TITLE = { doctors: "医生管理", patients: "患者管理", assess: "评估数据", train: "训练记录", accounts: "用户管理", roles: "角色管理", catalog: "项目配置", dict: "字典管理" };
+const GROUP_OF = { doctors: "用户管理", patients: "用户管理", assess: "数据管理", train: "数据管理", accounts: "系统设置", roles: "系统设置", catalog: "系统设置", dict: "系统设置" };
+const ROLE = { admin: "系统管理员", doctor: "医生", therapist: "治疗师", patient: "患者", family: "家属" };
+const DICT_NAME = { dept: "科室", education: "学历", title: "职称", source: "患者来源", assess_type: "评估类型", stop_reason: "终止原因" };
+
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const quickRange = (days) => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - days + 1); return [ymd(s), ymd(e)]; };
+
+const App = {
+  setup() {
+    /* ---------- 基础设施 ---------- */
+    const tk = ref(localStorage.getItem("hs_atk") || "");
+    const user = ref(null);
+    const view = ref("doctors");
+    const loading = ref(false);
+    const dicts = reactive({ dept: [], education: [], title: [], source: [], assess_type: [], stop_reason: [] });
+
+    const api = async (u, opt = {}) => {
+      const r = await fetch("/api/v1" + u, { ...opt, headers: { "Content-Type": "application/json", Authorization: "Bearer " + tk.value }, body: opt.body ? JSON.stringify(opt.body) : undefined });
+      if (r.status === 401) { tk.value = ""; localStorage.removeItem("hs_atk"); user.value = null; throw new Error("会话已过期，请重新登录"); }
+      const j = await r.json();
+      if (j.code !== 0) throw new Error(j.message);
+      return j.data;
+    };
+    const download = async (u, filename) => {
+      try {
+        const r = await fetch("/api/v1" + u, { headers: { Authorization: "Bearer " + tk.value } });
+        if (!r.ok) throw new Error("导出失败（" + r.status + "）");
+        const blob = await r.blob();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob); a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        msg.success("已导出 " + filename);
+      } catch (e) { msg.error(e.message); }
+    };
+    const loadDicts = async () => {
+      for (const t of Object.keys(dicts)) {
+        try { dicts[t] = await api("/dict/" + t); } catch (e) { dicts[t] = []; }
+      }
+    };
+
+    /* ---------- 登录 ---------- */
+    const lu = ref(""), lp = ref(""), logining = ref(false);
+    /* 记住密码：仅存本机浏览器（localStorage），密码经 base64 转码后保存，取消勾选即清除 */
+    const REMEMBER_KEY = "hs_remember_admin";
+    const remember = ref(false);
+    const b64e = (s) => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+    const b64d = (s) => { try { return new TextDecoder().decode(Uint8Array.from(atob(s), c => c.charCodeAt(0))); } catch (e) { return ""; } };
+    const loadRemember = () => {
+      try {
+        const raw = localStorage.getItem(REMEMBER_KEY);
+        if (!raw) return;
+        const o = JSON.parse(raw);
+        if (o && o.u) { lu.value = o.u; lp.value = b64d(o.p || ""); remember.value = true; }
+      } catch (e) { }
+    };
+    const saveRemember = () => {
+      try {
+        if (remember.value && lu.value.trim()) localStorage.setItem(REMEMBER_KEY, JSON.stringify({ u: lu.value.trim(), p: b64e(lp.value) }));
+        else localStorage.removeItem(REMEMBER_KEY);
+      } catch (e) { }
+    };
+    watch(remember, (v) => { if (!v) { try { localStorage.removeItem(REMEMBER_KEY); } catch (e) { } } });
+    const doLogin = async () => {
+      if (!lu.value.trim() || !lp.value) return msg.warning("请输入账号与密码");
+      logining.value = true;
+      try {
+        const d = await api("/auth/login", { method: "POST", body: { username: lu.value.trim(), password: lp.value } });
+        if (d.user.role !== "admin") return msg.error("请使用管理员账号登录管理端");
+        saveRemember();
+        tk.value = d.token; localStorage.setItem("hs_atk", d.token); user.value = d.user;
+        await bootstrap();
+        msg.success("欢迎回来，" + d.user.name);
+      } catch (e) { msg.error(e.message); } finally { logining.value = false; }
+    };
+    const logout = async () => {
+      try { await mbx.confirm("确认退出登录？", "提示", { type: "warning" }); } catch (e) { return; }
+      tk.value = ""; localStorage.removeItem("hs_atk"); user.value = null;
+    };
+
+    /* ---------- 通用：空值占位与前端分页 ---------- */
+    const dash = (v) => (v === null || v === undefined || v === "" || v === "-") ? "-" : v;
+    const pager = (listRef, pageRef, sizeRef) => computed(() => {
+      const a = listRef.value || [];
+      const s = sizeRef.value;
+      return a.slice((pageRef.value - 1) * s, pageRef.value * s);
+    });
+    const rowNo = (page, size, i) => (page - 1) * size + i + 1;
+
+    /* ---------- 医生管理（工号 / 姓名 / 手机 / 医院 / 科室 / 角色 / 状态） ---------- */
+    const dq = reactive({ kw: "", dept: "", role: "", status: "" });
+    const doctors = ref([]), dTotal = ref(0), dPage = ref(1), dSize = ref(10);
+    const dlg = ref(false), saving = ref(false);
+    const uform = reactive({ id: 0, username: "", real_name: "", role: "doctor", dept: "", hospital: "", phone: "", status: 1 });
+    const loadDoctors = async () => {
+      loading.value = true;
+      try {
+        const p = new URLSearchParams({ scope: "staff" });
+        if (dq.kw) p.set("kw", dq.kw); if (dq.dept) p.set("dept", dq.dept);
+        if (dq.role) p.set("role", dq.role); if (dq.status !== "") p.set("status", dq.status);
+        const d = await api("/users?" + p.toString());
+        doctors.value = d.rows; dTotal.value = d.total;
+      } catch (e) { msg.error(e.message); } finally { loading.value = false; }
+    };
+    const doctorsShown = pager(doctors, dPage, dSize);
+    const searchDoctors = () => { dPage.value = 1; loadDoctors(); };
+    const resetDoctors = () => { Object.assign(dq, { kw: "", dept: "", role: "", status: "" }); searchDoctors(); };
+    const openUser = (u) => {
+      Object.assign(uform, u
+        ? { id: u.id, username: u.username, real_name: u.real_name, role: u.role, dept: u.dept || "", hospital: u.hospital || "", phone: u.phone || "", status: u.status ? 1 : 0 }
+        : { id: 0, username: "", real_name: "", role: "doctor", dept: "", hospital: "", phone: "", status: 1 });
+      dlg.value = true;
+    };
+    const saveUser = async () => {
+      if (!uform.username.trim() || !uform.real_name.trim()) return msg.warning("工号与姓名为必填项");
+      saving.value = true;
+      try {
+        if (uform.id) {
+          await api("/users/" + uform.id, {
+            method: "PUT",
+            body: { real_name: uform.real_name, role: uform.role, dept: uform.dept, hospital: uform.hospital, phone: uform.phone, status: uform.status },
+          });
+          msg.success("已保存");
+        } else {
+          await api("/users", {
+            method: "POST",
+            body: { username: uform.username.trim(), real_name: uform.real_name, role: uform.role, dept: uform.dept, hospital: uform.hospital, phone: uform.phone },
+          });
+          msg.success("已新增");
+        }
+        dlg.value = false; loadDoctors();
+      } catch (e) { msg.error(e.message); } finally { saving.value = false; }
+    };
+    const resetPwd = async (u) => {
+      try { await mbx.confirm("重置「" + u.real_name + "」的密码为初始密码 hs123456？", "提示", { type: "warning" }); } catch (e) { return; }
+      try { const d = await api("/users/" + u.id + "/reset-password", { method: "POST" }); msg.success(d || "已重置为初始密码 hs123456"); } catch (e) { msg.error(e.message); }
+    };
+    const permName = (p) => {
+      const map = { "doc:patient": "患者信息", "doc:plan": "方案管理", "doc:assess": "评估功能", "doc:train": "训练功能", "doc:record": "数据记录", "admin:user": "用户管理", "admin:data": "数据管理", "admin:config": "系统设置", "admin:data:export": "数据导出" };
+      return map[p] || p;
+    };
+
+    /* ---------- 系统设置 · 用户管理（全部账号） ---------- */
+    const aq2 = reactive({ kw: "", role: "", status: "" });
+    const accounts = ref([]), aTotal = ref(0), aPage = ref(1), aSize = ref(10);
+    const roleOpts = ref([]);
+    const adlg = ref(false), aSaving = ref(false);
+    const aform = reactive({ id: 0, username: "", real_name: "", role: "doctor", status: 1 });
+    const loadRoleOpts = async () => { try { roleOpts.value = await api("/admin/role-options"); } catch (e) { roleOpts.value = []; } };
+    // 医生管理只涉及医护人员角色，管理员账号在「系统设置 → 用户管理」中维护
+    const staffRoles = computed(() => roleOpts.value.filter(r => r.key !== "admin"));
+    const roleName = (k) => { const r = roleOpts.value.find(x => x.key === k); return r ? r.name : (ROLE[k] || k); };
+    const loadAccounts = async () => {
+      loading.value = true;
+      try {
+        const p = new URLSearchParams();
+        p.set("scope", "sys");
+        if (aq2.kw) p.set("kw", aq2.kw);
+        if (aq2.role) p.set("role", aq2.role);
+        if (aq2.status !== "") p.set("status", aq2.status);
+        const d = await api("/users?" + p.toString());
+        accounts.value = d.rows; aTotal.value = d.total;
+      } catch (e) { msg.error(e.message); } finally { loading.value = false; }
+    };
+    const accountsShown = pager(accounts, aPage, aSize);
+    const searchAccounts = () => { aPage.value = 1; loadAccounts(); };
+    const resetAccounts = () => { Object.assign(aq2, { kw: "", role: "", status: "" }); searchAccounts(); };
+    const openAccount = (u) => {
+      Object.assign(aform, u
+        ? { id: u.id, username: u.username, real_name: u.real_name, role: u.role, status: u.status ? 1 : 0 }
+        : { id: 0, username: "", real_name: "", role: "doctor", status: 1 });
+      adlg.value = true;
+    };
+    const saveAccount = async () => {
+      if (!aform.username.trim() || !aform.real_name.trim()) return msg.warning("用户名与姓名为必填项");
+      aSaving.value = true;
+      try {
+        if (aform.id) {
+          await api("/users/" + aform.id, { method: "PUT", body: { real_name: aform.real_name, role: aform.role, status: aform.status } });
+          msg.success("已保存");
+        } else {
+          await api("/users", { method: "POST", body: { username: aform.username.trim(), real_name: aform.real_name, role: aform.role } });
+          msg.success("已新增");
+        }
+        adlg.value = false; loadAccounts();
+      } catch (e) { msg.error(e.message); } finally { aSaving.value = false; }
+    };
+
+    /* ---------- 患者管理 ---------- */
+    const pq = reactive({ kw: "", dept: "", status: "" });
+    const paccs = ref([]), pPage = ref(1), pSize = ref(10), pdrawer = ref(false), pdetail = ref(null);
+    const loadPaccs = async () => {
+      loading.value = true;
+      try {
+        const p = new URLSearchParams();
+        if (pq.kw) p.set("kw", pq.kw); if (pq.dept) p.set("dept", pq.dept);
+        if (pq.status !== "") p.set("status", pq.status);
+        paccs.value = await api("/admin/patient-accounts?" + p.toString());
+      } catch (e) { msg.error(e.message); } finally { loading.value = false; }
+    };
+    const paccsShown = pager(paccs, pPage, pSize);
+    const searchPaccs = () => { pPage.value = 1; loadPaccs(); };
+    const resetPaccs = () => { Object.assign(pq, { kw: "", dept: "", status: "" }); searchPaccs(); };
+    const ageOf = (bd) => bd ? Math.floor((Date.now() - new Date(bd)) / 31557600000) : "-";
+    const openPatient = async (row) => {
+      pdrawer.value = true; pdetail.value = null;
+      try { pdetail.value = await api("/admin/patient/" + row.pid); } catch (e) { msg.error(e.message); }
+    };
+    const togglePacc = async (u) => {
+      try { await mbx.confirm("确认" + (u.status ? "停用" : "启用") + "患者账号「" + u.name + "」？停用后患者无法登录患者端。", "提示", { type: "warning" }); } catch (e) { return; }
+      try { await api("/admin/patient-accounts/" + u.id, { method: "PUT", body: { status: u.status ? 0 : 1 } }); msg.success("已更新"); loadPaccs(); } catch (e) { msg.error(e.message); }
+    };
+    const resetPaccPwd = async (u) => {
+      try { await mbx.confirm("重置「" + u.name + "」的患者端密码为初始密码 hs123456？", "提示", { type: "warning" }); } catch (e) { return; }
+      try { const d = await api("/admin/patient-accounts/" + u.id + "/reset-password", { method: "POST" }); msg.success(d || "已重置"); } catch (e) { msg.error(e.message); }
+    };
+
+    /* ---------- 评估数据（只记录已完成评估） ---------- */
+    const aq = reactive({ kw: "", dept: "", doctor: "", hasReport: "", range: [], page: 1, size: 10 });
+    const aExpand = ref(false);
+    // 收起后仍生效的隐藏条件数，避免「筛选条件看不见但还在起作用」
+    const aMore = computed(() => [aq.doctor, aq.hasReport].filter(Boolean).length);
+    const ares = reactive({ rows: [], total: 0 });
+    const filters = ref({ depts: [], doctors: [], programs: [], results: [] });
+    const loadFilters = async () => { try { filters.value = await api("/admin/filters"); } catch (e) { /* 无权限时保持空 */ } };
+    const aqs = () => {
+      const p = new URLSearchParams();
+      Object.entries({ kw: aq.kw, dept: aq.dept, doctor: aq.doctor, hasReport: aq.hasReport }).forEach(([k, v]) => { if (v) p.set(k, v); });
+      if (aq.range && aq.range.length === 2) { p.set("from", aq.range[0]); p.set("to", aq.range[1]); }
+      return p;
+    };
+    const loadAssess = async () => {
+      loading.value = true;
+      try {
+        const p = aqs(); p.set("limit", aq.size); p.set("offset", (aq.page - 1) * aq.size);
+        const d = await api("/admin/assess?" + p.toString());
+        ares.rows = d.rows; ares.total = d.total;
+      } catch (e) { msg.error(e.message); } finally { loading.value = false; }
+    };
+    const searchAssess = () => { aq.page = 1; loadAssess(); };
+    const exportAssess = () => { const p = aqs(); download("/export/assess?" + p.toString(), "assess.csv"); };
+    // 单次评估的项目与分值明细
+    const adetail = ref(false), adetailData = ref(null), adetailLoading = ref(false);
+    const openAssess = async (row) => {
+      adetail.value = true; adetailData.value = null; adetailLoading.value = true;
+      try { adetailData.value = await api("/admin/assess/" + row.record_id); }
+      catch (e) { msg.error(e.message); } finally { adetailLoading.value = false; }
+    };
+    const itemScore = (p) => {
+      if (!p) return "-";
+      if (p.total !== undefined && p.total !== null) return p.total + " / " + (p.max || "-") + (p.adjust ? "（教育调整+" + p.adjust + "）" : "");
+      if (p.metrics) return Object.entries(p.metrics).map(([k, v]) => k + " " + v).join("；");
+      return "-";
+    };
+
+    /* ---------- 训练记录 ---------- */
+    const tq = reactive({ kw: "", program: "", result: "", dept: "", levelMin: null, levelMax: null, range: [], page: 1, size: 10 });
+    const tExpand = ref(false);
+    const tMore = computed(() => [tq.dept, tq.result, tq.levelMin, tq.levelMax].filter(v => v !== "" && v !== null && v !== undefined).length);
+    const tres = reactive({ rows: [], total: 0 });
+    const tqs = () => {
+      const p = new URLSearchParams();
+      Object.entries({ kw: tq.kw, program: tq.program, result: tq.result, dept: tq.dept }).forEach(([k, v]) => { if (v) p.set(k, v); });
+      if (tq.levelMin !== null && tq.levelMin !== "") p.set("levelMin", tq.levelMin);
+      if (tq.levelMax !== null && tq.levelMax !== "") p.set("levelMax", tq.levelMax);
+      if (tq.range && tq.range.length === 2) { p.set("from", tq.range[0]); p.set("to", tq.range[1]); }
+      return p;
+    };
+    const loadTrain = async () => {
+      loading.value = true;
+      try {
+        const p = tqs(); p.set("limit", tq.size); p.set("offset", (tq.page - 1) * tq.size);
+        const d = await api("/admin/train?" + p.toString());
+        tres.rows = d.rows; tres.total = d.total;
+      } catch (e) { msg.error(e.message); } finally { loading.value = false; }
+    };
+    const searchTrain = () => { tq.page = 1; loadTrain(); };
+    const exportTrain = () => { const p = tqs(); download("/export/train?" + p.toString(), "train.csv"); };
+    const resetAssess = () => { Object.assign(aq, { kw: "", dept: "", doctor: "", hasReport: "", range: [], page: 1 }); loadAssess(); };
+    const resetTrain = () => { Object.assign(tq, { kw: "", program: "", result: "", dept: "", levelMin: null, levelMax: null, range: [], page: 1 }); loadTrain(); };
+
+    /* ---------- 角色管理（可维护：名称 / 状态 / 权限） ---------- */
+    const roles = ref([]), roleTree = ref([]), rTotal = ref(0), rPage = ref(1), rSize = ref(10);
+    const rq = reactive({ name: "", status: "" });
+    const rdlg = ref(false), rSaving = ref(false);
+    const rform = reactive({ id: 0, name: "", status: 1, perms: [], builtin: false });
+    const loadRoles = async () => {
+      loading.value = true;
+      try {
+        const d = await api("/admin/roles");
+        roles.value = d.rows; roleTree.value = d.tree; rTotal.value = d.rows.length;
+      } catch (e) { msg.error(e.message); } finally { loading.value = false; }
+    };
+    const rolesShown = computed(() => {
+      const a = roles.value.filter(r => (!rq.name || r.name.includes(rq.name)) && (rq.status === "" || r.status === rq.status));
+      rTotal.value = a.length;
+      return a.slice((rPage.value - 1) * rSize.value, rPage.value * rSize.value);
+    });
+    const searchRoles = () => { rPage.value = 1; };
+    const resetRoles = () => { Object.assign(rq, { name: "", status: "" }); rPage.value = 1; };
+    const openRole = (r) => {
+      Object.assign(rform, r
+        ? { id: r.id, name: r.name, status: r.status, perms: [...r.perms], builtin: r.builtin }
+        : { id: 0, name: "", status: 1, perms: [], builtin: false });
+      rdlg.value = true;
+      nextTick(() => nextTick(() => { if (treeRef.value) treeRef.value.setCheckedKeys(rform.perms); }));
+    };
+    const treeRef = ref(null);
+    const saveRole = async () => {
+      if (!rform.name.trim()) return msg.warning("请输入角色名称");
+      rSaving.value = true;
+      const perms = treeRef.value ? treeRef.value.getCheckedKeys().filter(k => k.includes(":")) : rform.perms;
+      try {
+        if (rform.id) await api("/admin/roles/" + rform.id, { method: "PUT", body: { name: rform.name, status: rform.status, perms } });
+        else await api("/admin/roles", { method: "POST", body: { name: rform.name, status: rform.status, perms } });
+        msg.success("已保存"); rdlg.value = false; loadRoles(); loadRoleOpts();
+      } catch (e) { msg.error(e.message); } finally { rSaving.value = false; }
+    };
+    const delRole = async (r) => {
+      try { await mbx.confirm("删除角色「" + r.name + "」？", "提示", { type: "warning" }); } catch (e) { return; }
+      try { const m = await api("/admin/roles/" + r.id, { method: "DELETE" }); msg.success(m || "已删除"); loadRoles(); loadRoleOpts(); }
+      catch (e) { msg.error(e.message); }
+    };
+
+    /* ---------- 项目配置 ---------- */
+    const ctTab = ref("scale"), ctRows = ref([]), ctKinds = ref([]), ctLoading = ref(false);
+    const ctPage = ref(1), ctSize = ref(10);
+    const ctDlg = ref(false), ctSaving = ref(false);
+    const ctForm = reactive({ code: "", name: "", kind: "scale", minutes: 10, startLevel: 1, freq: 3, weeks: 12 });
+    const ctShown = pager(ctRows, ctPage, ctSize);
+    // 资产原始时长可能是「8–10」这类区间文本，统一取首个数字
+    const minOf = (r) => parseInt((r.params || {}).minutes, 10) || parseInt(r.minutes, 10) || 10;
+    // 展示用：保留「8–10」这类区间原文，不截断成单个数字
+    const minText = (r) => {
+      const raw = String(((r.params || {}).minutes ?? r.minutes ?? "") || "").trim();
+      if (/[–—\-~～]/.test(raw)) return raw.replace(/\s*(分钟|min)$/i, "") + " 分钟";
+      return (parseInt(raw, 10) || 10) + " 分钟";
+    };
+    const loadCatalog = async () => {
+      ctLoading.value = true;
+      try { const d = await api("/admin/catalog?kind=" + ctTab.value); ctRows.value = d.rows; ctKinds.value = d.kinds; }
+      catch (e) { msg.error(e.message); } finally { ctLoading.value = false; }
+    };
+    const pickCatalog = (k) => { ctTab.value = k; ctPage.value = 1; loadCatalog(); };
+    const toggleCatalog = async (r) => {
+      try { await api(`/admin/catalog/${ctTab.value}/${r.code}`, { method: "PUT", body: { enabled: !r.enabled } }); msg.success(r.enabled ? "已停用" : "已启用"); loadCatalog(); }
+      catch (e) { msg.error(e.message); }
+    };
+    const openCatalog = (r) => {
+      Object.assign(ctForm, {
+        code: r.code, name: r.name, kind: ctTab.value,
+        minutes: minOf(r),
+        startLevel: r.params.startLevel || 1,
+        freq: r.params.freq || 3,
+        weeks: r.params.weeks || 12,
+      });
+      ctDlg.value = true;
+    };
+    const saveCatalog = async () => {
+      ctSaving.value = true;
+      const params = ctForm.kind === "training"
+        ? { startLevel: +ctForm.startLevel, minutes: +ctForm.minutes, freq: +ctForm.freq, weeks: +ctForm.weeks }
+        : { minutes: +ctForm.minutes };
+      try {
+        await api(`/admin/catalog/${ctForm.kind}/${ctForm.code}`, { method: "PUT", body: { params } });
+        msg.success("已保存"); ctDlg.value = false; loadCatalog();
+      } catch (e) { msg.error(e.message); } finally { ctSaving.value = false; }
+    };
+
+    /* ---------- 字典管理 ---------- */
+    const SCOPE_NAME = { doctor: "医生端", admin: "管理端" };
+    const scopeText = (t) => (t && t.scopes && t.scopes.length)
+      ? t.scopes.map(k => SCOPE_NAME[k] || k).join("·") : "未设置";
+    const dt = ref("dept"), dictRows = ref([]), dictTypes = ref([]), dictCounts = ref({}), dDlg = ref(false), dSaving = ref(false);
+    const diPage = ref(1), diSize = ref(10);
+    const dform = reactive({ id: 0, type: "dept", label: "", sort: 100, remark: "" });
+    const curType = computed(() => dictTypes.value.find(t => t.type === dt.value) || { name: "", scopes: [], builtin: 0 });
+    const loadDict = async () => {
+      loading.value = true;
+      try {
+        const d = await api("/admin/dict?type=" + dt.value);
+        dictRows.value = d.rows; dictTypes.value = d.types; dictCounts.value = d.counts || {};
+        if (!d.types.some(t => t.type === dt.value) && d.types.length) dt.value = d.types[0].type;
+      }
+      catch (e) { msg.error(e.message); } finally { loading.value = false; }
+    };
+    const dictShown = pager(dictRows, diPage, diSize);
+    const pickDict = (t) => { dt.value = t; diPage.value = 1; loadDict(); };
+    const openDict = (r) => {
+      Object.assign(dform, r ? { id: r.id, type: r.type, label: r.label, sort: r.sort, remark: r.remark } : { id: 0, type: dt.value, label: "", sort: 100, remark: "" });
+      dDlg.value = true;
+    };
+    const saveDict = async () => {
+      if (!dform.label.trim()) return msg.warning("请输入字典项名称");
+      dSaving.value = true;
+      try {
+        if (dform.id) await api("/admin/dict/" + dform.id, { method: "PUT", body: { label: dform.label, sort: dform.sort, remark: dform.remark } });
+        else await api("/admin/dict", { method: "POST", body: { type: dform.type, label: dform.label, sort: dform.sort, remark: dform.remark } });
+        msg.success("已保存"); dDlg.value = false; loadDict(); loadDicts();
+      } catch (e) { msg.error(e.message); } finally { dSaving.value = false; }
+    };
+    const toggleDict = async (r) => {
+      try { await api("/admin/dict/" + r.id, { method: "PUT", body: { status: r.status ? 0 : 1 } }); msg.success("已更新"); loadDict(); loadDicts(); } catch (e) { msg.error(e.message); }
+    };
+    const delDict = async (r) => {
+      try { await mbx.confirm("删除字典项「" + r.label + "」？已被业务数据使用的项将改为停用。", "提示", { type: "warning" }); } catch (e) { return; }
+      try { const m = await api("/admin/dict/" + r.id, { method: "DELETE" }); msg.success(m || "已删除"); loadDict(); loadDicts(); } catch (e) { msg.error(e.message); }
+    };
+    /* 字典类型：新增 / 编辑 / 删除 */
+    const tDlg = ref(false), tSaving = ref(false);
+    const tform = reactive({ id: 0, type: "", name: "", scopes: ["doctor", "admin"], builtin: 0 });
+    const openType = (t) => {
+      Object.assign(tform, t && t.id
+        ? { id: t.id, type: t.type, name: t.name, scopes: [...(t.scopes || [])], builtin: t.builtin }
+        : { id: 0, type: "", name: "", scopes: ["doctor", "admin"], builtin: 0 });
+      tDlg.value = true;
+    };
+    const saveType = async () => {
+      if (!tform.name.trim()) return msg.warning("请输入字典名称");
+      if (!tform.id && !/^[a-z][a-z0-9_]{1,29}$/.test(tform.type.trim())) return msg.warning("标识需以小写字母开头，仅含小写字母、数字、下划线");
+      if (!tform.scopes.length) return msg.warning("请至少勾选一个适用范围");
+      tSaving.value = true;
+      try {
+        if (tform.id) await api("/admin/dict-type/" + tform.id, { method: "PUT", body: { name: tform.name, scopes: tform.scopes } });
+        else await api("/admin/dict-type", { method: "POST", body: { type: tform.type.trim(), name: tform.name, scopes: tform.scopes } });
+        msg.success("已保存"); tDlg.value = false;
+        if (!tform.id) dt.value = tform.type.trim();
+        loadDict();
+      } catch (e) { msg.error(e.message); } finally { tSaving.value = false; }
+    };
+    const delType = async () => {
+      try { await mbx.confirm("删除字典类型「" + tform.name + "」？", "提示", { type: "warning" }); } catch (e) { return; }
+      try { const m = await api("/admin/dict-type/" + tform.id, { method: "DELETE" }); msg.success(m || "已删除"); tDlg.value = false; dt.value = "dept"; loadDict(); }
+      catch (e) { msg.error(e.message); }
+    };
+
+    /* ---------- 启动 ---------- */
+    const bootstrap = async () => {
+      await Promise.all([loadDoctors(), loadPaccs(), loadDicts(), loadFilters(), loadRoleOpts()]);
+    };
+    const onSelect = (k) => {
+      view.value = k;
+      if (k === "doctors") loadDoctors();
+      if (k === "patients") loadPaccs();
+      if (k === "assess") { loadFilters(); loadAssess(); }
+      if (k === "train") { loadFilters(); loadTrain(); }
+      if (k === "accounts") { loadRoleOpts(); loadAccounts(); }
+      if (k === "roles") loadRoles();
+      if (k === "catalog") loadCatalog();
+      if (k === "dict") loadDict();
+    };
+    onMounted(async () => {
+      loadRemember();
+      if (!tk.value) return;
+      try { user.value = await api("/auth/profile"); await bootstrap(); } catch (e) { msg.error(e.message); }
+    });
+
+    return {
+      tk, user, view, loading, lu, lp, logining, remember, doLogin, logout, MENU, TITLE, GROUP_OF, ROLE, DICT_NAME, onSelect,
+      dash, rowNo,
+      dicts, dq, doctors, doctorsShown, dTotal, dPage, dSize, dlg, saving, uform, openUser, saveUser, resetPwd, permName, loadDoctors, searchDoctors, resetDoctors,
+      aq2, accounts, accountsShown, aTotal, aPage, aSize, roleOpts, staffRoles, roleName, adlg, aSaving, aform, loadAccounts, searchAccounts, resetAccounts, openAccount, saveAccount, loadRoleOpts,
+      pq, paccs, paccsShown, pPage, pSize, pdrawer, pdetail, openPatient, togglePacc, resetPaccPwd, ageOf, loadPaccs, searchPaccs, resetPaccs,
+      aq, aExpand, aMore, ares, filters, loadAssess, searchAssess, resetAssess, exportAssess, adetail, adetailData, adetailLoading, openAssess, itemScore,
+      tq, tExpand, tMore, tres, loadTrain, searchTrain, resetTrain, exportTrain,
+      roles, rolesShown, roleTree, rTotal, rPage, rSize, rq, rdlg, rSaving, rform, treeRef, loadRoles, searchRoles, resetRoles, openRole, saveRole, delRole,
+      ctTab, ctRows, ctShown, ctPage, ctSize, ctKinds, ctLoading, ctDlg, ctSaving, ctForm, loadCatalog, pickCatalog, toggleCatalog, openCatalog, saveCatalog, minOf, minText,
+      dt, dictRows, dictShown, diPage, diSize, dictTypes, dictCounts, dDlg, dSaving, dform, loadDict, pickDict, openDict, saveDict, toggleDict, delDict,
+      SCOPE_NAME, scopeText, curType, tDlg, tSaving, tform, openType, saveType, delType,
+      quickRange, download,
+    };
+  },
+
+  template: `
+  <!-- ==================== 登录（书页式居中窗口） ==================== -->
+  <div v-if="!user" class="lg-wrap">
+    <div class="lg-book">
+      <div class="lg-page lg-brand">
+        <div class="lg-logo"><img src="/assets/logo.png" alt=""></div>
+        <div class="lg-title">认知功能障碍评估与训练软件</div>
+        <div class="lg-co">海思太科医疗科技（杭州）有限公司</div>
+      </div>
+      <div class="lg-page lg-form">
+        <div class="lg-hd">
+          <h3>管理员登录</h3>
+          <p>请使用系统管理员账号登录</p>
+        </div>
+        <el-form @submit.prevent>
+          <el-form-item><el-input v-model="lu" size="large" placeholder="管理员账号" @keyup.enter="doLogin"><template #prefix><el-icon><User /></el-icon></template></el-input></el-form-item>
+          <el-form-item><el-input v-model="lp" size="large" type="password" show-password placeholder="密码" @keyup.enter="doLogin"><template #prefix><el-icon><Lock /></el-icon></template></el-input></el-form-item>
+          <div class="lg-row"><el-checkbox v-model="remember">记住密码</el-checkbox></div>
+          <el-button type="primary" size="large" class="lg-btn" :loading="logining" @click="doLogin">登 录</el-button>
+        </el-form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 主框架 ============ -->
+  <el-container v-else class="lb-app">
+    <el-aside width="220px" class="lb-aside">
+      <div class="lb-logo">
+        <img class="mark" src="/assets/logo.png" alt="认知功能障碍评估与训练">
+        <div><div class="t">认知功能障碍评估与训练</div><div class="s">管理端</div></div>
+      </div>
+      <el-menu :default-active="view" :default-openeds="['g-用户管理', 'g-数据管理', 'g-系统设置']">
+        <template v-for="g in MENU" :key="g.group || 'main'">
+          <el-sub-menu v-if="g.group" :index="'g-' + g.group">
+            <template #title><el-icon><component :is="g.items[0].i" /></el-icon>{{ g.group }}</template>
+            <el-menu-item v-for="it in g.items" :key="it.k" :index="it.k" @click="onSelect(it.k)">{{ it.n }}</el-menu-item>
+          </el-sub-menu>
+          <template v-else>
+            <el-menu-item v-for="it in g.items" :key="it.k" :index="it.k" @click="onSelect(it.k)">
+              <el-icon><component :is="it.i" /></el-icon>{{ it.n }}
+            </el-menu-item>
+          </template>
+        </template>
+      </el-menu>
+      <div class="lb-user">
+        <el-dropdown trigger="click" placement="top-start">
+          <div class="u-hit" title="账号与退出">
+            <el-avatar :size="30" style="background:var(--c-primary);font-size:12px">{{ user.name[0] }}</el-avatar>
+            <div class="u"><div class="n">{{ user.name }}</div></div>
+          </div>
+          <template #dropdown><el-dropdown-menu>
+            <el-dropdown-item @click="logout">退出登录</el-dropdown-item>
+          </el-dropdown-menu></template>
+        </el-dropdown>
+      </div>
+    </el-aside>
+
+    <el-container>
+      <el-header class="lb-header" height="54px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="lb-page-title">{{ TITLE[view] }}</span>
+          <span style="font-size:12px;color:var(--c-text-3)">/ {{ GROUP_OF[view] }}</span>
+        </div>
+      </el-header>
+
+      <el-main class="lb-main">
+
+        <!-- ---------- 医生管理 ---------- -->
+        <div v-if="view === 'doctors'">
+          <div class="lb-card query-card">
+            <div class="head"><div class="t">医生查询</div></div>
+            <div class="q-row">
+              <el-form inline @submit.prevent>
+                <el-form-item>
+                  <el-input v-model="dq.kw" placeholder="工号 / 姓名 / 手机号" style="width:240px" clearable @keyup.enter="searchDoctors"><template #prefix><el-icon><Search /></el-icon></template></el-input>
+                </el-form-item>
+                <el-form-item label="科室">
+                  <el-select v-model="dq.dept" placeholder="全部科室" clearable style="width:150px" @change="searchDoctors">
+                    <el-option v-for="d in dicts.dept" :key="d.id" :value="d.label" :label="d.label" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="角色">
+                  <el-select v-model="dq.role" placeholder="全部角色" clearable style="width:130px" @change="searchDoctors">
+                    <el-option v-for="r in staffRoles" :key="r.key" :value="r.key" :label="r.name" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="状态">
+                  <el-select v-model="dq.status" placeholder="全部状态" clearable style="width:120px" @change="searchDoctors">
+                    <el-option :value="1" label="启用" /><el-option :value="0" label="停用" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item>
+                  <el-button type="primary" @click="searchDoctors">查询</el-button>
+                  <el-button @click="resetDoctors">重置</el-button>
+                </el-form-item>
+              </el-form>
+              <el-button type="primary" class="q-act" @click="openUser()"><el-icon style="margin-right:5px"><Plus /></el-icon>新增账号</el-button>
+            </div>
+          </div>
+
+          <div class="lb-card flush list-card">
+            <div class="head"><div class="t">医生列表</div></div>
+            <el-table :data="doctorsShown" v-loading="loading" style="width:100%">
+              <el-table-column label="序号" width="72" align="center"><template #default="s">{{ rowNo(dPage, dSize, s.$index) }}</template></el-table-column>
+              <el-table-column label="工号" min-width="118" align="center"><template #default="s">{{ dash(s.row.username) }}</template></el-table-column>
+              <el-table-column label="姓名" min-width="100" align="center"><template #default="s">{{ dash(s.row.real_name) }}</template></el-table-column>
+              <el-table-column label="手机号码" min-width="126" align="center"><template #default="s">{{ dash(s.row.phone) }}</template></el-table-column>
+              <el-table-column label="医院名称" min-width="168" align="center"><template #default="s">{{ dash(s.row.hospital) }}</template></el-table-column>
+              <el-table-column label="科室名称" min-width="118" align="center"><template #default="s">{{ dash(s.row.dept) }}</template></el-table-column>
+              <el-table-column label="状态" min-width="86" align="center">
+                <template #default="s"><el-tag size="small" :type="s.row.status ? 'success' : 'info'" effect="light">{{ s.row.status ? '启用' : '停用' }}</el-tag></template>
+              </el-table-column>
+              <el-table-column label="创建时间" min-width="150" align="center"><template #default="s">{{ dash((s.row.created_at || '').slice(0, 16)) }}</template></el-table-column>
+              <el-table-column label="操作" width="180" align="center">
+                <template #default="s">
+                  <el-button size="small" plain @click="openUser(s.row)">编辑</el-button>
+                  <el-button size="small" plain @click="resetPwd(s.row)">重置密码</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div class="lb-pager">
+              <el-pagination background layout="total, sizes, prev, pager, next" :total="dTotal"
+                v-model:current-page="dPage" v-model:page-size="dSize" :page-sizes="[10, 20, 50]" />
+            </div>
+          </div>
+
+          <el-dialog v-model="dlg" :title="uform.id ? '编辑账号' : '新增账号'" width="520px">
+            <el-form label-width="100px">
+              <el-form-item label="工号" required><el-input v-model="uform.username" :disabled="!!uform.id" placeholder="请输入工号" /></el-form-item>
+              <el-form-item label="姓名" required><el-input v-model="uform.real_name" placeholder="请输入姓名" /></el-form-item>
+              <el-form-item label="手机号码"><el-input v-model="uform.phone" maxlength="11" placeholder="请输入手机号码" /></el-form-item>
+              <el-form-item label="医院名称"><el-input v-model="uform.hospital" placeholder="请输入医院名称" /></el-form-item>
+              <el-form-item label="科室名称">
+                <el-select v-model="uform.dept" style="width:100%" clearable filterable allow-create placeholder="选择或输入科室名称">
+                  <el-option v-for="d in dicts.dept" :key="d.id" :value="d.label" :label="d.label" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="角色">
+                <el-select v-model="uform.role" style="width:100%">
+                  <el-option v-for="r in staffRoles" :key="r.key" :value="r.key" :label="r.name" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="状态">
+                <el-radio-group v-model="uform.status">
+                  <el-radio :value="1">启用</el-radio><el-radio :value="0">停用</el-radio>
+                </el-radio-group>
+              </el-form-item>
+            </el-form>
+            <template #footer><el-button @click="dlg = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveUser">确认</el-button></template>
+          </el-dialog>
+        </div>
+
+        <!-- ---------- 患者管理 ---------- -->
+        <div v-else-if="view === 'patients'">
+          <div class="lb-card query-card">
+            <div class="head"><div class="t">患者查询</div></div>
+            <div class="q-row">
+              <el-form inline @submit.prevent>
+                <el-form-item>
+                  <el-input v-model="pq.kw" placeholder="姓名 / 门诊号 / 手机号" style="width:240px" clearable @keyup.enter="searchPaccs"><template #prefix><el-icon><Search /></el-icon></template></el-input>
+                </el-form-item>
+                <el-form-item label="科室">
+                  <el-select v-model="pq.dept" placeholder="全部科室" clearable style="width:150px" @change="searchPaccs">
+                    <el-option v-for="d in dicts.dept" :key="d.id" :value="d.label" :label="d.label" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="账号状态">
+                  <el-select v-model="pq.status" placeholder="全部状态" clearable style="width:130px" @change="searchPaccs">
+                    <el-option :value="1" label="正常" /><el-option :value="0" label="停用" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item>
+                  <el-button type="primary" @click="searchPaccs">查询</el-button>
+                  <el-button @click="resetPaccs">重置</el-button>
+                </el-form-item>
+              </el-form>
+            </div>
+          </div>
+
+          <div class="lb-card flush list-card">
+            <div class="head"><div class="t">患者列表</div></div>
+            <el-table :data="paccsShown" v-loading="loading" style="width:100%">
+              <el-table-column label="序号" width="72" align="center"><template #default="s">{{ rowNo(pPage, pSize, s.$index) }}</template></el-table-column>
+              <el-table-column label="姓名" min-width="90" align="center"><template #default="s">{{ dash(s.row.name) }}</template></el-table-column>
+              <el-table-column label="性别" min-width="66" align="center"><template #default="s">{{ dash(s.row.sex) }}</template></el-table-column>
+              <el-table-column label="年龄" min-width="66" align="center"><template #default="s">{{ ageOf(s.row.birth_date) }}</template></el-table-column>
+              <el-table-column label="门诊号" min-width="112" align="center"><template #default="s">{{ dash(s.row.outpatient_no) }}</template></el-table-column>
+              <el-table-column label="科室" min-width="112" align="center"><template #default="s">{{ dash(s.row.dept) }}</template></el-table-column>
+              <el-table-column label="任务账号" min-width="132" align="center"><template #default="s"><span class="mono" style="font-size:12px">{{ dash(s.row.username) }}</span></template></el-table-column>
+              <el-table-column label="账号状态" min-width="92" align="center">
+                <template #default="s"><el-tag size="small" :type="s.row.status ? 'success' : 'info'" effect="light">{{ s.row.status ? '正常' : '停用' }}</el-tag></template>
+              </el-table-column>
+              <el-table-column label="建档时间" min-width="112" align="center"><template #default="s">{{ dash((s.row.created_at || '').slice(0, 10)) }}</template></el-table-column>
+              <el-table-column label="操作" width="248" align="center">
+                <template #default="s">
+                  <el-button size="small" plain @click="openPatient(s.row)">查看</el-button>
+                  <el-button size="small" plain @click="resetPaccPwd(s.row)">重置密码</el-button>
+                  <el-button size="small" plain @click="togglePacc(s.row)">{{ s.row.status ? '停用' : '启用' }}</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div class="lb-pager">
+              <el-pagination background layout="total, sizes, prev, pager, next" :total="paccs.length"
+                v-model:current-page="pPage" v-model:page-size="pSize" :page-sizes="[10, 20, 50]" />
+            </div>
+          </div>
+
+          <el-drawer v-model="pdrawer" title="患者档案" size="480px">
+            <div v-if="!pdetail"><el-skeleton :rows="6" animated /></div>
+            <div v-else>
+              <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+                <el-avatar :size="44" style="background:var(--c-primary)">{{ pdetail.name[0] }}</el-avatar>
+                <div><div style="font-size:16px;font-weight:600">{{ pdetail.name }}</div>
+                  <div style="font-size:12px;color:var(--c-text-3)">{{ pdetail.sex }} · {{ pdetail.age }}岁 · {{ pdetail.education }} · {{ pdetail.outpatient_no }}</div></div>
+              </div>
+              <el-descriptions :column="2" border size="small">
+                <el-descriptions-item label="科室">{{ pdetail.dept || '—' }}</el-descriptions-item>
+                <el-descriptions-item label="联系电话">{{ pdetail.phone || '—' }}</el-descriptions-item>
+                <el-descriptions-item label="联系人">{{ pdetail.guardian || '—' }}</el-descriptions-item>
+                <el-descriptions-item label="建档时间">{{ (pdetail.created_at || '').slice(0, 10) }}</el-descriptions-item>
+                <el-descriptions-item label="病史摘要" :span="2">{{ pdetail.history || '—' }}</el-descriptions-item>
+              </el-descriptions>
+              <div class="lb-stats c3" style="margin-top:16px">
+                <div class="lb-stat"><div class="k">评估</div><div class="v">{{ pdetail.assessCount }}</div></div>
+                <div class="lb-stat"><div class="k">报告</div><div class="v">{{ pdetail.reportCount }}</div></div>
+                <div class="lb-stat"><div class="k">训练</div><div class="v">{{ pdetail.trainCount }}</div></div>
+              </div>
+              <div class="lb-card" style="margin-top:14px">
+                <div class="head"><div class="t">报告列表</div></div>
+                <el-empty v-if="!pdetail.reports.length" description="暂无报告" :image-size="60" />
+                <div v-for="r in pdetail.reports" :key="r.id" style="display:flex;gap:10px;padding:7px 0;border-bottom:1px dashed var(--c-line);font-size:12.5px">
+                  <span class="num" style="width:150px">{{ r.report_no }}</span><span style="color:var(--c-text-3)">{{ (r.created_at || '').slice(0, 16) }}</span>
+                </div>
+              </div>
+            </div>
+          </el-drawer>
+        </div>
+
+        <!-- ---------- 评估数据（仅已完成评估） ---------- -->
+        <div v-else-if="view === 'assess'">
+          <div class="lb-card query-card">
+            <div class="head"><div class="t">评估查询</div></div>
+            <div class="q-row">
+              <el-form class="q-form" inline @submit.prevent>
+                <el-form-item>
+                  <el-input v-model="aq.kw" placeholder="患者姓名 / 门诊号" style="width:220px" clearable @keyup.enter="searchAssess"><template #prefix><el-icon><Search /></el-icon></template></el-input>
+                </el-form-item>
+                <el-form-item label="科室">
+                  <el-select v-model="aq.dept" placeholder="全部科室" clearable style="width:140px" @change="searchAssess">
+                    <el-option v-for="d in filters.depts" :key="d" :value="d" :label="d" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item>
+                  <el-date-picker v-model="aq.range" type="daterange" value-format="YYYY-MM-DD" range-separator="至"
+                    start-placeholder="开始日期" end-placeholder="结束日期" style="width:240px" @change="searchAssess" />
+                </el-form-item>
+                <el-form-item v-show="aExpand" label="评估医生">
+                  <el-select v-model="aq.doctor" placeholder="全部医生" clearable style="width:130px" @change="searchAssess">
+                    <el-option v-for="d in filters.doctors" :key="d" :value="d" :label="d" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item v-show="aExpand" label="报告">
+                  <el-select v-model="aq.hasReport" placeholder="全部" clearable style="width:120px" @change="searchAssess">
+                    <el-option value="1" label="有报告" /><el-option value="0" label="无报告" />
+                  </el-select>
+                </el-form-item>
+              </el-form>
+              <div class="q-actions">
+                <el-button type="primary" @click="searchAssess">查询</el-button>
+                <el-button @click="resetAssess">重置</el-button>
+                <el-button plain class="q-toggle" @click="aExpand = !aExpand">
+                  {{ aExpand ? '收起' : (aMore ? '展开 ' + aMore : '展开') }}<el-icon :class="{ on: aExpand }"><ArrowDown /></el-icon>
+                </el-button>
+              </div>
+            </div>
+          </div>
+
+          <div class="lb-card flush list-card">
+            <div class="head" style="display:flex;align-items:center;justify-content:space-between">
+              <div class="t">评估记录</div>
+              <el-button type="primary" size="small" @click="exportAssess"><el-icon style="margin-right:4px"><Download /></el-icon>导出当前结果</el-button>
+            </div>
+            <el-table :data="ares.rows" v-loading="loading" style="width:100%">
+              <el-table-column label="序号" width="72" align="center">
+                <template #default="s">{{ rowNo(aq.page, aq.size, s.$index) }}</template>
+              </el-table-column>
+              <el-table-column label="患者" min-width="90" align="center"><template #default="s">{{ dash(s.row.name) }}</template></el-table-column>
+              <el-table-column label="性别" min-width="66" align="center"><template #default="s">{{ dash(s.row.sex) }}</template></el-table-column>
+              <el-table-column label="年龄" min-width="66" align="center"><template #default="s">{{ ageOf(s.row.birth_date) }}</template></el-table-column>
+              <el-table-column label="门诊号" min-width="112" align="center"><template #default="s">{{ dash(s.row.outpatient_no) }}</template></el-table-column>
+              <el-table-column label="科室" min-width="108" align="center"><template #default="s">{{ dash(s.row.dept) }}</template></el-table-column>
+              <el-table-column label="评估方案" min-width="150" align="center" show-overflow-tooltip><template #default="s">{{ dash(s.row.plan_name) }}</template></el-table-column>
+              <el-table-column label="评估医生" min-width="98" align="center"><template #default="s">{{ dash(s.row.doctor_name) }}</template></el-table-column>
+              <el-table-column label="评估时间" min-width="146" align="center"><template #default="s">{{ dash((s.row.started_at || '').slice(0, 16)) }}</template></el-table-column>
+              <el-table-column label="报告编号" min-width="150" align="center"><template #default="s"><span class="mono" style="font-size:12px">{{ dash(s.row.report_no) }}</span></template></el-table-column>
+              <el-table-column label="操作" width="108" align="center">
+                <template #default="s"><el-button size="small" plain @click="openAssess(s.row)">查看</el-button></template>
+              </el-table-column>
+            </el-table>
+            <div class="lb-pager">
+              <el-pagination background layout="total, sizes, prev, pager, next" :total="ares.total"
+                v-model:current-page="aq.page" v-model:page-size="aq.size" :page-sizes="[10, 20, 50]" @current-change="loadAssess" @size-change="searchAssess" />
+            </div>
+          </div>
+
+          <el-dialog v-model="adetail" title="评估明细" width="620px">
+            <div v-if="adetailLoading"><el-skeleton :rows="5" animated /></div>
+            <div v-else-if="adetailData">
+              <el-descriptions :column="2" border size="small">
+                <el-descriptions-item label="患者">{{ dash(adetailData.record.patient_name) }}</el-descriptions-item>
+                <el-descriptions-item label="评估方案">{{ dash(adetailData.record.plan_name) }}</el-descriptions-item>
+                <el-descriptions-item label="评估医生">{{ dash(adetailData.record.doctor_name) }}</el-descriptions-item>
+                <el-descriptions-item label="评估时间">{{ dash((adetailData.record.started_at || '').slice(0, 16)) }}</el-descriptions-item>
+              </el-descriptions>
+              <el-table :data="adetailData.items" size="small" style="width:100%;margin-top:12px">
+                <el-table-column label="类型" width="80" align="center">
+                  <template #default="s"><el-tag size="small" :type="s.row.kind === 'scale' ? 'primary' : 'success'" effect="plain">{{ s.row.kind === 'scale' ? '量表' : '范式' }}</el-tag></template>
+                </el-table-column>
+                <el-table-column prop="name" label="项目" min-width="180" align="center" />
+                <el-table-column label="结果" min-width="240" align="center">
+                  <template #default="s"><span style="font-size:12px;color:var(--c-text-2)">{{ itemScore(s.row.payload) }}</span></template>
+                </el-table-column>
+              </el-table>
+            </div>
+            <template #footer><el-button @click="adetail = false">关闭</el-button></template>
+          </el-dialog>
+        </div>
+
+        <!-- ---------- 训练记录 ---------- -->
+        <div v-else-if="view === 'train'">
+          <div class="lb-card query-card">
+            <div class="head"><div class="t">训练查询</div></div>
+            <div class="q-row">
+              <el-form class="q-form" inline @submit.prevent>
+                <el-form-item>
+                  <el-input v-model="tq.kw" placeholder="患者姓名 / 门诊号" style="width:210px" clearable @keyup.enter="searchTrain"><template #prefix><el-icon><Search /></el-icon></template></el-input>
+                </el-form-item>
+                <el-form-item label="训练方案">
+                  <el-select v-model="tq.program" placeholder="全部方案" clearable filterable style="width:170px" @change="searchTrain">
+                    <el-option v-for="p in filters.programs" :key="p.code" :value="p.code" :label="p.code + ' · ' + p.name" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item>
+                  <el-date-picker v-model="tq.range" type="daterange" value-format="YYYY-MM-DD" range-separator="至"
+                    start-placeholder="开始日期" end-placeholder="结束日期" style="width:240px" @change="searchTrain" />
+                </el-form-item>
+                <el-form-item v-show="tExpand" label="科室">
+                  <el-select v-model="tq.dept" placeholder="全部科室" clearable style="width:140px" @change="searchTrain">
+                    <el-option v-for="d in filters.depts" :key="d" :value="d" :label="d" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item v-show="tExpand" label="结果">
+                  <el-select v-model="tq.result" placeholder="全部结果" clearable style="width:120px" @change="searchTrain">
+                    <el-option v-for="r in filters.results" :key="r" :value="r" :label="r" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item v-show="tExpand" label="关卡">
+                  <el-input-number v-model="tq.levelMin" :min="1" :max="10" controls-position="right" style="width:92px" @change="searchTrain" />
+                  <span style="margin:0 6px;color:var(--c-text-3)">—</span>
+                  <el-input-number v-model="tq.levelMax" :min="1" :max="10" controls-position="right" style="width:92px" @change="searchTrain" />
+                </el-form-item>
+              </el-form>
+              <div class="q-actions">
+                <el-button type="primary" @click="searchTrain">查询</el-button>
+                <el-button @click="resetTrain">重置</el-button>
+                <el-button plain class="q-toggle" @click="tExpand = !tExpand">
+                  {{ tExpand ? '收起' : (tMore ? '展开 ' + tMore : '展开') }}<el-icon :class="{ on: tExpand }"><ArrowDown /></el-icon>
+                </el-button>
+              </div>
+            </div>
+          </div>
+
+          <div class="lb-card flush list-card">
+            <div class="head" style="display:flex;align-items:center;justify-content:space-between">
+              <div class="t">训练记录</div>
+              <el-button type="primary" size="small" @click="exportTrain"><el-icon style="margin-right:4px"><Download /></el-icon>导出当前结果</el-button>
+            </div>
+            <el-table :data="tres.rows" v-loading="loading" style="width:100%">
+              <el-table-column label="序号" width="64" align="center">
+                <template #default="s">{{ rowNo(tq.page, tq.size, s.$index) }}</template>
+              </el-table-column>
+              <el-table-column label="患者" min-width="84" align="center"><template #default="s">{{ dash(s.row.name) }}</template></el-table-column>
+              <el-table-column label="门诊号" min-width="104" align="center"><template #default="s">{{ dash(s.row.outpatient_no) }}</template></el-table-column>
+              <el-table-column label="科室" min-width="96" align="center"><template #default="s">{{ dash(s.row.dept) }}</template></el-table-column>
+              <el-table-column label="方案" min-width="84" align="center"><template #default="s">{{ dash(s.row.program) }}</template></el-table-column>
+              <el-table-column label="关卡" min-width="62" align="center"><template #default="s"><span class="num">L{{ s.row.level }}</span></template></el-table-column>
+              <el-table-column label="用时" min-width="72" align="center"><template #default="s"><span class="num">{{ Math.round(s.row.duration_s / 60) }} 分</span></template></el-table-column>
+              <el-table-column label="正确率" min-width="76" align="center"><template #default="s"><span class="num">{{ Math.round(s.row.acc * 100) }}%</span></template></el-table-column>
+              <el-table-column label="反应时" min-width="84" align="center"><template #default="s"><span class="num">{{ s.row.avg_rt }}ms</span></template></el-table-column>
+              <el-table-column label="提示" min-width="60" align="center"><template #default="s">{{ s.row.hint_cnt || 0 }}</template></el-table-column>
+              <el-table-column label="结果" min-width="80" align="center">
+                <template #default="s"><el-tag size="small" :type="s.row.result === '未通过' ? 'warning' : 'success'" effect="plain">{{ s.row.result }}</el-tag></template>
+              </el-table-column>
+              <el-table-column label="难度调整" min-width="92" align="center"><template #default="s">{{ dash(s.row.adjust) }}</template></el-table-column>
+              <el-table-column label="训练时间" min-width="134" align="center"><template #default="s">{{ dash((s.row.created_at || '').slice(0, 16)) }}</template></el-table-column>
+            </el-table>
+            <div class="lb-pager">
+              <el-pagination background layout="total, sizes, prev, pager, next" :total="tres.total"
+                v-model:current-page="tq.page" v-model:page-size="tq.size" :page-sizes="[10, 20, 50]" @current-change="loadTrain" @size-change="searchTrain" />
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------- 系统设置 · 用户管理 ---------- -->
+        <div v-else-if="view === 'accounts'">
+          <div class="lb-card query-card">
+            <div class="head"><div class="t">用户查询</div></div>
+            <div class="q-row">
+              <el-form inline @submit.prevent>
+                <el-form-item>
+                  <el-input v-model="aq2.kw" placeholder="用户名 / 姓名" style="width:220px" clearable @keyup.enter="searchAccounts"><template #prefix><el-icon><Search /></el-icon></template></el-input>
+                </el-form-item>
+                <el-form-item label="角色">
+                  <el-select v-model="aq2.role" placeholder="全部角色" clearable style="width:140px" @change="searchAccounts">
+                    <el-option v-for="r in roleOpts" :key="r.key" :value="r.key" :label="r.name" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="账号状态">
+                  <el-select v-model="aq2.status" placeholder="全部状态" clearable style="width:130px" @change="searchAccounts">
+                    <el-option :value="1" label="启用" /><el-option :value="0" label="停用" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item>
+                  <el-button type="primary" @click="searchAccounts">查询</el-button>
+                  <el-button @click="resetAccounts">重置</el-button>
+                </el-form-item>
+              </el-form>
+              <el-button type="primary" class="q-act" @click="openAccount()"><el-icon style="margin-right:5px"><Plus /></el-icon>新增</el-button>
+            </div>
+          </div>
+
+          <div class="lb-card flush list-card">
+            <div class="head"><div class="t">用户列表</div></div>
+            <el-table :data="accountsShown" v-loading="loading" style="width:100%">
+              <el-table-column label="序号" width="72" align="center"><template #default="s">{{ rowNo(aPage, aSize, s.$index) }}</template></el-table-column>
+              <el-table-column label="用户名" min-width="150" align="center"><template #default="s">{{ dash(s.row.username) }}</template></el-table-column>
+              <el-table-column label="姓名" min-width="120" align="center"><template #default="s">{{ dash(s.row.real_name) }}</template></el-table-column>
+              <el-table-column label="角色" min-width="130" align="center"><template #default="s">{{ roleName(s.row.role) }}</template></el-table-column>
+              <el-table-column label="账号状态" min-width="110" align="center">
+                <template #default="s"><el-tag size="small" :type="s.row.status ? 'success' : 'info'" effect="light">{{ s.row.status ? '启用' : '停用' }}</el-tag></template>
+              </el-table-column>
+              <el-table-column label="操作人" min-width="120" align="center"><template #default="s">{{ dash(s.row.created_by) }}</template></el-table-column>
+              <el-table-column label="操作时间" min-width="150" align="center"><template #default="s">{{ dash((s.row.created_at || '').slice(0, 16)) }}</template></el-table-column>
+              <el-table-column label="操作" width="180" align="center">
+                <template #default="s">
+                  <el-button size="small" plain @click="openAccount(s.row)">编辑</el-button>
+                  <el-button size="small" plain @click="resetPwd(s.row)">重置密码</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div class="lb-pager">
+              <el-pagination background layout="total, sizes, prev, pager, next" :total="aTotal"
+                v-model:current-page="aPage" v-model:page-size="aSize" :page-sizes="[10, 20, 50]" />
+            </div>
+          </div>
+
+          <el-dialog v-model="adlg" :title="aform.id ? '编辑账号' : '新增账号'" width="480px">
+            <el-form label-width="92px">
+              <el-form-item label="用户名" required><el-input v-model="aform.username" :disabled="!!aform.id" placeholder="请输入用户名" /></el-form-item>
+              <el-form-item label="姓名" required><el-input v-model="aform.real_name" placeholder="请输入姓名" /></el-form-item>
+              <el-form-item label="角色" required>
+                <el-select v-model="aform.role" style="width:100%">
+                  <el-option v-for="r in roleOpts" :key="r.key" :value="r.key" :label="r.name" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="用户状态" required>
+                <el-radio-group v-model="aform.status">
+                  <el-radio :value="1">启用</el-radio><el-radio :value="0">停用</el-radio>
+                </el-radio-group>
+              </el-form-item>
+            </el-form>
+            <template #footer><el-button @click="adlg = false">取消</el-button><el-button type="primary" :loading="aSaving" @click="saveAccount">确认</el-button></template>
+          </el-dialog>
+        </div>
+
+        <!-- ---------- 系统设置 · 角色管理 ---------- -->
+        <div v-else-if="view === 'roles'">
+          <div class="lb-card query-card">
+            <div class="head"><div class="t">角色查询</div></div>
+            <div class="q-row">
+              <el-form inline @submit.prevent>
+                <el-form-item>
+                  <el-input v-model="rq.name" placeholder="角色名称" style="width:220px" clearable @keyup.enter="searchRoles"><template #prefix><el-icon><Search /></el-icon></template></el-input>
+                </el-form-item>
+                <el-form-item label="角色状态">
+                  <el-select v-model="rq.status" placeholder="全部状态" clearable style="width:140px" @change="searchRoles">
+                    <el-option :value="1" label="启用" /><el-option :value="0" label="停用" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item>
+                  <el-button type="primary" @click="searchRoles">查询</el-button>
+                  <el-button @click="resetRoles">重置</el-button>
+                </el-form-item>
+              </el-form>
+              <el-button type="primary" class="q-act" @click="openRole()"><el-icon style="margin-right:5px"><Plus /></el-icon>新增</el-button>
+            </div>
+          </div>
+
+          <div class="lb-card flush list-card">
+            <div class="head"><div class="t">角色列表</div></div>
+            <el-table :data="rolesShown" v-loading="loading" style="width:100%">
+              <el-table-column label="序号" width="72" align="center"><template #default="s">{{ rowNo(rPage, rSize, s.$index) }}</template></el-table-column>
+              <el-table-column label="角色名称" min-width="180" align="center"><template #default="s">{{ dash(s.row.name) }}</template></el-table-column>
+              <el-table-column label="角色状态" min-width="120" align="center">
+                <template #default="s"><el-tag size="small" :type="s.row.status ? 'success' : 'info'" effect="light">{{ s.row.status ? '启用' : '停用' }}</el-tag></template>
+              </el-table-column>
+              <el-table-column label="账号数" min-width="100" align="center"><template #default="s"><span class="num">{{ s.row.userCount }}</span></template></el-table-column>
+              <el-table-column label="操作人" min-width="130" align="center"><template #default="s">{{ dash(s.row.operator) }}</template></el-table-column>
+              <el-table-column label="操作时间" min-width="150" align="center"><template #default="s">{{ dash((s.row.created_at || '').slice(0, 16)) }}</template></el-table-column>
+              <el-table-column label="操作" width="180" align="center">
+                <template #default="s">
+                  <el-button size="small" plain @click="openRole(s.row)">编辑</el-button>
+                  <el-button size="small" plain :disabled="s.row.builtin" @click="delRole(s.row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div class="lb-pager">
+              <el-pagination background layout="total, sizes, prev, pager, next" :total="rTotal"
+                v-model:current-page="rPage" v-model:page-size="rSize" :page-sizes="[10, 20, 50]" />
+            </div>
+          </div>
+
+          <el-dialog v-model="rdlg" :title="rform.id ? '编辑角色' : '新增角色'" width="640px">
+            <el-form label-width="92px">
+              <el-row :gutter="12">
+                <el-col :span="12">
+                  <el-form-item label="角色名称" required><el-input v-model="rform.name" placeholder="请输入角色名称" /></el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="角色状态" required>
+                    <el-radio-group v-model="rform.status">
+                      <el-radio :value="1">启用</el-radio><el-radio :value="0">停用</el-radio>
+                    </el-radio-group>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              <el-form-item label="功能权限">
+                <div style="width:100%;border:1px solid var(--c-line);border-radius:10px;padding:8px 10px;max-height:320px;overflow:auto">
+                  <el-tree ref="treeRef" :data="roleTree" show-checkbox node-key="key"
+                    :props="{ label: 'name', children: 'children' }" default-expand-all />
+                </div>
+              </el-form-item>
+            </el-form>
+            <template #footer><el-button @click="rdlg = false">取消</el-button><el-button type="primary" :loading="rSaving" @click="saveRole">确认</el-button></template>
+          </el-dialog>
+        </div>
+
+        <!-- ---------- 系统设置 · 项目配置 ---------- -->
+        <div v-else-if="view === 'catalog'">
+          <div class="lb-card flush list-card">
+            <div class="head" style="display:flex;align-items:center;justify-content:space-between">
+              <div class="t">项目配置</div>
+            </div>
+            <div style="padding:0 16px">
+              <el-tabs v-model="ctTab" @tab-change="pickCatalog">
+                <el-tab-pane label="量表评估" name="scale" />
+                <el-tab-pane label="范式评估" name="paradigm" />
+                <el-tab-pane label="训练方案" name="training" />
+              </el-tabs>
+            </div>
+            <el-table :data="ctShown" v-loading="ctLoading" style="width:100%">
+              <el-table-column label="序号" width="72" align="center"><template #default="s">{{ rowNo(ctPage, ctSize, s.$index) }}</template></el-table-column>
+              <el-table-column prop="code" label="编码" min-width="90" align="center" />
+              <el-table-column prop="name" label="名称" min-width="190" align="center" />
+              <el-table-column v-if="ctTab !== 'scale'" label="认知域" min-width="130" align="center">
+                <template #default="s">{{ dash(s.row.domain) }}</template>
+              </el-table-column>
+              <el-table-column v-if="ctTab === 'training'" label="关卡" min-width="82" align="center">
+                <template #default="s">{{ s.row.levelCount }} 关</template>
+              </el-table-column>
+              <el-table-column v-if="ctTab === 'training'" label="起始难度" min-width="92" align="center">
+                <template #default="s">L{{ s.row.params.startLevel || 1 }}</template>
+              </el-table-column>
+              <el-table-column label="单次时长" min-width="98" align="center">
+                <template #default="s">{{ minText(s.row) }}</template>
+              </el-table-column>
+              <el-table-column v-if="ctTab === 'training'" label="建议频次" min-width="98" align="center">
+                <template #default="s">每周 {{ s.row.params.freq || 3 }} 次</template>
+              </el-table-column>
+              <el-table-column label="状态" min-width="82" align="center">
+                <template #default="s"><el-tag size="small" :type="s.row.enabled ? 'success' : 'info'" effect="light">{{ s.row.enabled ? '启用' : '停用' }}</el-tag></template>
+              </el-table-column>
+              <el-table-column label="操作" width="180" align="center">
+                <template #default="s">
+                  <el-button size="small" plain @click="openCatalog(s.row)">参数</el-button>
+                  <el-button size="small" plain @click="toggleCatalog(s.row)">{{ s.row.enabled ? '停用' : '启用' }}</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div class="lb-pager">
+              <el-pagination background layout="total, sizes, prev, pager, next" :total="ctRows.length"
+                v-model:current-page="ctPage" v-model:page-size="ctSize" :page-sizes="[10, 20, 50]" />
+            </div>
+          </div>
+
+          <el-dialog v-model="ctDlg" :title="ctForm.name + ' · 参数'" width="460px">
+            <el-form label-width="100px">
+              <el-form-item label="单次时长">
+                <el-input-number v-model="ctForm.minutes" :min="1" :max="60" controls-position="right" style="width:130px" />
+                <span style="margin-left:8px;font-size:12px;color:var(--c-text-3)">分钟</span>
+              </el-form-item>
+              <template v-if="ctForm.kind === 'training'">
+                <el-form-item label="起始难度">
+                  <el-select v-model="ctForm.startLevel" style="width:130px">
+                    <el-option v-for="n in 10" :key="n" :value="n" :label="'L' + n" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="建议频次">
+                  <el-select v-model="ctForm.freq" style="width:130px">
+                    <el-option v-for="n in [3,4,5]" :key="n" :value="n" :label="'每周 ' + n + ' 次'" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="建议疗程">
+                  <el-select v-model="ctForm.weeks" style="width:130px">
+                    <el-option v-for="n in [8,10,12]" :key="n" :value="n" :label="n + ' 周'" />
+                  </el-select>
+                </el-form-item>
+              </template>
+            </el-form>
+            <template #footer><el-button @click="ctDlg = false">取消</el-button><el-button type="primary" :loading="ctSaving" @click="saveCatalog">保存</el-button></template>
+          </el-dialog>
+        </div>
+
+        <!-- ---------- 系统设置 · 字典管理 ---------- -->
+        <div v-else-if="view === 'dict'">
+          <div class="dict-body">
+            <div class="dict-nav">
+              <div class="dict-nav-head">
+                <span class="t">字典类型</span>
+                <div style="display:flex;gap:6px">
+                  <el-button size="small" plain @click="openType(curType)">编辑</el-button>
+                  <el-button size="small" plain @click="openType()">新增</el-button>
+                </div>
+              </div>
+              <button v-for="t in dictTypes" :key="t.type" :class="{ on: dt === t.type }" @click="pickDict(t.type)">
+                <span class="dn">{{ t.name }}</span>
+                <span class="dsc">{{ scopeText(t) }}</span>
+                <span class="dc">{{ dictCounts[t.type] || 0 }}</span>
+              </button>
+            </div>
+            <div class="lb-card flush list-card" style="margin:0">
+              <div class="head">
+                <div class="t">{{ curType.name }} · 字典项</div>
+                <el-button type="primary" size="small" @click="openDict()"><el-icon style="margin-right:4px"><Plus /></el-icon>新增字典项</el-button>
+              </div>
+              <el-table :data="dictShown" v-loading="loading" style="width:100%">
+                <el-table-column label="序号" width="72" align="center"><template #default="s">{{ rowNo(diPage, diSize, s.$index) }}</template></el-table-column>
+                <el-table-column label="名称" min-width="180" align="center"><template #default="s">{{ dash(s.row.label) }}</template></el-table-column>
+                <el-table-column label="排序" min-width="90" align="center"><template #default="s">{{ s.row.sort }}</template></el-table-column>
+                <el-table-column label="状态" min-width="90" align="center">
+                  <template #default="s"><el-tag size="small" :type="s.row.status ? 'success' : 'info'" effect="light">{{ s.row.status ? '启用' : '停用' }}</el-tag></template>
+                </el-table-column>
+                <el-table-column label="备注" min-width="200" align="center" show-overflow-tooltip><template #default="s">{{ dash(s.row.remark) }}</template></el-table-column>
+                <el-table-column label="操作" width="232" align="center">
+                  <template #default="s">
+                    <el-button size="small" plain @click="openDict(s.row)">编辑</el-button>
+                    <el-button size="small" plain @click="toggleDict(s.row)">{{ s.row.status ? '停用' : '启用' }}</el-button>
+                    <el-button size="small" plain @click="delDict(s.row)">删除</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <div class="lb-pager">
+                <el-pagination background layout="total, sizes, prev, pager, next" :total="dictRows.length"
+                  v-model:current-page="diPage" v-model:page-size="diSize" :page-sizes="[10, 20, 50]" />
+              </div>
+            </div>
+          </div>
+
+          <el-dialog v-model="dDlg" :title="dform.id ? '编辑字典项' : '新增字典项'" width="480px">
+            <el-form label-width="88px">
+              <el-form-item label="字典类型">
+                <el-select v-model="dform.type" :disabled="!!dform.id" style="width:100%">
+                  <el-option v-for="t in dictTypes" :key="t.type" :value="t.type" :label="t.name" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="名称" required><el-input v-model="dform.label" placeholder="如 神经内科" /></el-form-item>
+              <el-form-item label="排序"><el-input-number v-model="dform.sort" :min="1" :max="999" controls-position="right" style="width:120px" /></el-form-item>
+              <el-form-item label="备注"><el-input v-model="dform.remark" placeholder="选填" /></el-form-item>
+            </el-form>
+            <template #footer><el-button @click="dDlg = false">取消</el-button><el-button type="primary" :loading="dSaving" @click="saveDict">确认</el-button></template>
+          </el-dialog>
+
+          <el-dialog v-model="tDlg" :title="tform.id ? '编辑字典类型' : '新增字典类型'" width="480px">
+            <el-form label-width="88px">
+              <el-form-item label="字典名称" required><el-input v-model="tform.name" placeholder="如 康复评定类型" /></el-form-item>
+              <el-form-item label="标识" required><el-input v-model="tform.type" :disabled="!!tform.id" placeholder="小写字母开头，如 rehab_type" /></el-form-item>
+              <el-form-item label="适用范围" required>
+                <el-checkbox-group v-model="tform.scopes">
+                  <el-checkbox value="doctor">医生端</el-checkbox><el-checkbox value="admin">管理端</el-checkbox>
+                </el-checkbox-group>
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button v-if="tform.id && !tform.builtin" type="danger" plain style="float:left" @click="delType">删除</el-button>
+              <el-button @click="tDlg = false">取消</el-button>
+              <el-button type="primary" :loading="tSaving" @click="saveType">确认</el-button>
+            </template>
+          </el-dialog>
+        </div>
+
+      </el-main>
+    </el-container>
+  </el-container>`,
+};
+
+const app = createApp(App);
+app.use(ElementPlus, { locale: ElementPlusLocaleZhCn });
+for (const [k, c] of Object.entries(ElementPlusIconsVue)) app.component(k, c);
+app.mount("#app");
+</script></body></html>

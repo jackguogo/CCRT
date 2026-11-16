@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>认知功能障碍评估与训练软件 HS-CRT-01 · 体验版</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/theme.css">
+<script src="/icons.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--c-text);
+  background:radial-gradient(1100px 620px at 88% -12%, rgba(14,159,138,.10), transparent), #f5f7f9;
+  min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px 20px}
+.wrap{display:grid;grid-template-columns:1fr 1.12fr;gap:48px;max-width:1080px;align-items:center;width:100%}
+.lg{display:flex;align-items:center;gap:12px}
+.mark{width:44px;height:44px;border-radius:12px;background:var(--c-primary);color:#fff;display:flex;align-items:center;justify-content:center}
+.mark .hs-ico{width:24px;height:24px;stroke-width:1.5}
+.co{font-weight:600;font-size:14px}
+.co span{display:block;font-size:11px;color:var(--c-text-3);font-weight:400;font-family:var(--font-num);margin-top:2px}
+h1{font-size:31px;line-height:1.42;margin:28px 0 14px;font-weight:600;letter-spacing:.5px}
+h1 b{color:var(--c-primary);font-weight:600}
+.sub{color:var(--c-text-2);line-height:2;font-size:13.5px;max-width:520px}
+.caps{display:flex;gap:32px;margin-top:32px;flex-wrap:wrap}
+.cap{border-left:2px solid var(--c-primary-line);padding-left:12px}
+.cap b{display:block;font-family:var(--font-num);font-size:22px;color:var(--c-text);font-weight:600}
+.cap span{font-size:11.5px;color:var(--c-text-3)}
+.entries{display:flex;flex-direction:column;gap:12px}
+.entry{display:flex;align-items:center;gap:14px;background:#fff;border:1px solid var(--c-line);border-radius:12px;
+  padding:16px 18px;text-decoration:none;color:inherit;transition:.16s;box-shadow:var(--shadow-xs)}
+.entry:hover{transform:translateY(-2px);box-shadow:var(--shadow-sm);border-color:var(--c-primary-line)}
+.entry .ic{width:42px;height:42px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  background:var(--c-primary-soft);color:var(--c-primary)}
+.entry .ic .hs-ico{width:21px;height:21px}
+.entry .t{font-weight:600;font-size:14.5px}
+.entry .t em{font-style:normal;font-size:11.5px;color:var(--c-text-3);margin-left:8px;font-weight:400}
+.entry .d{font-size:12px;color:var(--c-text-3);margin-top:3px;line-height:1.7}
+.entry .go{margin-left:auto;color:var(--c-text-4);font-size:16px}
+.entry .port{font-family:var(--font-num);font-size:10.5px;color:var(--c-primary);background:var(--c-primary-soft);
+  border-radius:5px;padding:1px 6px;margin-left:6px;font-weight:500;letter-spacing:.2px}
+.foot{grid-column:1/-1;font-size:11.5px;color:var(--c-text-3);line-height:2;margin-top:10px;border-top:1px solid var(--c-line);padding-top:16px}
+.foot b{color:var(--c-text-2);font-family:var(--font-num)}
+@media (max-width:900px){.wrap{grid-template-columns:1fr;gap:32px}h1{font-size:25px}}
+</style></head><body>
+<div class="wrap">
+  <div>
+    <div class="lg"><div class="mark"><i data-ico="UI-BRAIN"></i></div>
+      <div class="co">海思太科医疗科技（杭州）有限公司<span>HS-CRT-01 · V1.0.0 · 21-06 康复训练软件 · 第二类</span></div></div>
+    <h1>认知功能障碍<br><b>评估与训练</b>软件</h1>
+    <p class="sub">按 DSM-5 六大认知域构建「评估 → 报告 → 方案推荐 → 自适应训练 → 阶段复评」完整临床闭环。
+    内置 6 个评定量表、12 项标准化范式、24 个训练方案 × 10 级难度关卡。<br>
+    评估与训练结果仅供医疗专业人员参考，产品不具备自动诊断功能。</p>
+    <div class="caps">
+      <div class="cap"><b>6 + 12</b><span>评定量表 + 范式</span></div>
+      <div class="cap"><b>240</b><span>训练关卡（六域）</span></div>
+      <div class="cap"><b>100</b><span>最大并发用户</span></div>
+      <div class="cap"><b>B 级</b><span>软件安全性级别</span></div>
+    </div>
+  </div>
+  <div class="entries">
+    <a class="entry" data-key="doctor" href="/doctor">
+      <div class="ic"><i data-ico="UI-DOCTOR"></i></div>
+      <div><div class="t">医生端<em>医生 / 治疗师 · 内置 doctor</em><span class="port" data-port="doctor"></span></div>
+      <div class="d">患者登记 · 量表评估 · 范式评估 · 报告判读 · 训练方案 · 训练记录</div></div><div class="go">›</div></a>
+    <a class="entry" data-key="admin" href="/admin">
+      <div class="ic" style="background:var(--c-info-soft);color:var(--c-info)"><i data-ico="UI-ADMIN"></i></div>
+      <div><div class="t">管理端<em>系统管理员 · 内置 admin</em><span class="port" data-port="admin"></span></div>
+      <div class="d">账号与权限（RBAC）· 患者档案 · 评估/训练数据 · 量表与方案 · 审计与备份</div></div><div class="go">›</div></a>
+    <a class="entry" data-key="patient" href="/patient">
+      <div class="ic" style="background:var(--c-warning-soft);color:var(--c-warning)"><i data-ico="UI-PATIENT"></i></div>
+      <div><div class="t">患者端（H5）<em>手机 / 平板 · 内置 PAT-MZ260812</em><span class="port" data-port="patient"></span></div>
+      <div class="d">任务清单 · 范式作答 · 24 方案游戏化训练 · 报告摘要（年龄不限制）</div></div><div class="go">›</div></a>
+    <div class="foot">推荐体验路径：医生端选择患者 → 发起评估（三项身份核对）→ 完成量表 → 患者端完成范式与训练 → 生成报告 → 据此配置训练方案 → 医生端查看趋势。<br>
+    三端各占独立端口：<b id="portline">—</b>（本页为门户页，可从任一端口访问）。<br>
+    所有账号初始密码统一为 <b>hs123456</b>；数据存于本地 data/ 目录，删除可重置。</div>
+  </div>
+</div>
+<script>
+/* 三端端口由服务端 /api/v1/entry 下发，避免在前端硬编码 */
+fetch("/api/v1/entry").then(r => r.json()).then(j => {
+  const list = (j && j.data) || [];
+  list.forEach(e => {
+    const a = document.querySelector('.entry[data-key="' + e.key + '"]');
+    if (a) a.href = e.url;
+    const t = document.querySelector('[data-port="' + e.key + '"]');
+    if (t) t.textContent = ":" + e.port;
+  });
+  const line = document.getElementById("portline");
+  if (line && list.length) line.textContent = list.map(e => e.name + " " + e.port).join(" · ");
+}).catch(() => {});
+</script>
+</body></html>

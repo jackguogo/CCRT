@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>认知训练方案库 · 六大认知体系 · HS-CRT-01</title>
+<style>
+:root{
+  --bg:#f5f7f9; --surface:#fff; --line:#e6ebf0; --line-2:#eef2f6;
+  --text:#1f2d3d; --text-2:#4b5f72; --text-3:#7b8b9a; --text-4:#a3b0bc;
+  --primary:#0e9f8a; --primary-soft:#e6f6f3; --radius:12px;
+  --shadow-xs:0 1px 2px rgba(16,32,48,.04);
+  --shadow-sm:0 4px 14px rgba(16,32,48,.08);
+  --ca:#3b82f6; --ca-bg:#eaf2fe; --ex:#d97706; --ex-bg:#fef4e6;
+  --lm:#e05252; --lm-bg:#fdeeee; --la:#7c5cf0; --la-bg:#f2eefe;
+  --vp:#0e9f8a; --vp-bg:#e6f6f3; --sc:#db3f8a; --sc-bg:#fdeef5;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--text);background:var(--bg);min-height:100vh;-webkit-font-smoothing:antialiased}
+.top{background:#fff;border-bottom:1px solid var(--line);padding:16px 30px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:9}
+.top .mark{width:38px;height:38px;border-radius:11px;background:var(--primary-soft);color:var(--primary);display:flex;align-items:center;justify-content:center}
+.top .mark .hs-ico{width:21px;height:21px}
+.top h1{font-size:16px;font-weight:600;letter-spacing:.2px}
+.top .s{font-size:11.5px;color:var(--text-3);margin-top:3px}
+.top .r{margin-left:auto;text-align:right;font-size:11.5px;color:var(--text-3);line-height:1.8}
+.top .r b{color:var(--text-2);font-weight:600}
+.wrap{max-width:1160px;margin:0 auto;padding:22px 24px 56px}
+.bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.bar .lab{font-size:12px;color:var(--text-3);margin-right:2px}
+.chip{border:1px solid var(--line);background:#fff;border-radius:99px;padding:5px 13px;font-size:12px;color:var(--text-2);cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:5px}
+.chip:hover{border-color:#cfdae3}
+.chip .hs-ico{width:13px;height:13px}
+.chip.on{background:var(--primary-soft);border-color:transparent;color:#0b7f6e;font-weight:600}
+.dom-h{display:flex;align-items:center;gap:10px;margin:24px 0 11px}
+.dom-h .de{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none}
+.dom-h .de .hs-ico{width:17px;height:17px}
+.dom-h b{font-size:14px;color:var(--text)}
+.dom-h .cnt{font-size:11px;color:var(--text-4);font-weight:400;margin-left:2px}
+.dom-h .dn{font-size:11.5px;color:var(--text-3);margin-left:auto;max-width:520px;text-align:right;line-height:1.7}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:12px}
+.pcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;cursor:pointer;text-decoration:none;color:inherit;transition:.16s;box-shadow:var(--shadow-xs);display:block}
+.pcard:hover{transform:translateY(-2px);box-shadow:var(--shadow-sm);border-color:#d7e2ea}
+.cover{height:82px;display:flex;align-items:center;justify-content:center;position:relative}
+.cover .tile{width:46px;height:46px;border-radius:13px;background:#fff;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.95);box-shadow:0 1px 2px rgba(16,32,48,.05),0 6px 14px rgba(16,32,48,.07)}
+.cover .tile .hs-ico{width:25px;height:25px}
+.cover .lv{position:absolute;right:8px;top:8px;background:rgba(255,255,255,.92);border-radius:99px;padding:1px 8px;font-size:10px;font-weight:600;color:var(--text-2)}
+.pb{padding:10px 13px 13px}
+.pb .n{font-weight:600;font-size:13.5px;color:var(--text)}
+.pb .c{font-size:10.5px;color:var(--text-4);margin-top:2px;font-variant-numeric:tabular-nums}
+.pb .d{font-size:11.5px;color:var(--text-2);margin-top:6px;line-height:1.6;height:37px;overflow:hidden}
+.lvlbar{display:flex;gap:3px;margin-top:10px}
+.lvlbar span{flex:1;height:4px;border-radius:2px}
+.foot{margin-top:32px;font-size:11.5px;color:var(--text-3);line-height:2;border-top:1px solid var(--line);padding-top:16px;text-align:center}
+</style></head><body>
+<div class="top">
+  <div class="mark"><i data-ico="学习与记忆"></i></div>
+  <div><h1>认知训练方案库 · 六大认知体系</h1>
+    <div class="s">HS-CRT-01 · DSM-5 六域 · 24 方案 × 10 级难度关卡 · 点击卡片进入可玩训练</div></div>
+  <div class="r">依据《认知训练中国指南（2022）》设计<br><b>单次 20–30 分钟 · 每周 3–5 次 · 疗程 8–12 周</b></div>
+</div>
+<div class="wrap">
+  <div class="bar" id="bar"><span class="lab">按认知域筛选</span></div>
+  <div id="body"></div>
+  <div class="foot">每个方案为独立可玩页面：选择关卡 → 玩法说明 → 逐关训练 → 结算（星级 / 正确率 / 升降关）。判定规则与软件一致：正确率 ≥80% 且限时达标 → 升 1 关 · 连优跳关 · 3 败降关（保底第 1 关）。<br>
+  认知功能障碍评估与训练软件（HS-CRT-01）· 海思太科医疗科技（杭州）有限公司 · 21-06 康复训练软件 · 第二类</div>
+</div>
+<script src="/icons.js"></script>
+<script>
+const DOMS = [
+  ["复合性注意", "ca", "训练选择性、持续性、分配性与转换性注意——提升信息过滤、多任务并行与规则切换能力。"],
+  ["执行能力", "ex", "训练抑制控制、认知灵活性、计划推理与工作记忆刷新。"],
+  ["学习与记忆", "lm", "训练短时记忆广度、词语学习与延迟回忆、视觉联想记忆、前瞻记忆与场景记忆。"],
+  ["语言", "la", "训练命名提取、言语流畅性、语义理解与听理解复述。"],
+  ["视结构-知觉能力", "vp", "训练视知觉辨别、空间构建、心理旋转与空间记忆、视觉运动整合。"],
+  ["社会认知", "sc", "训练面部情绪识别、心理理论、社会情境推理与语用理解。"]
+];
+const PROGS = [
+  ["CA-01","信号捕捉","复合性注意","stream","持续性注意训练（CPT 范式）：刺激流中捕捉目标"],
+  ["CA-02","目标搜索","复合性注意","grid","选择性注意训练（视觉搜索）：干扰物中找全部目标"],
+  ["CA-03","一心二用","复合性注意","stream","分配性注意训练（双任务）：数字比较 + 图形计数"],
+  ["CA-04","快速切换","复合性注意","stream","转换性注意训练（任务转换）：按线索在两套规则间切换"],
+  ["EX-01","色词辨析","执行能力","stream","抑制控制训练（Stroop 范式）：按字色作答"],
+  ["EX-02","智慧连线","执行能力","grid","认知灵活性训练（TMT 范式）：顺序 / 交替连线"],
+  ["EX-03","宝塔规划","执行能力","tower","计划推理训练（伦敦塔范式）：最少步数达成目标布局"],
+  ["EX-04","数字倒数","执行能力","seq","工作记忆刷新训练：正背 → 倒背 → n-back"],
+  ["LM-01","数字传真","学习与记忆","seq","短时记忆广度训练（数字广度）"],
+  ["LM-02","词海拾贝","学习与记忆","recall","词语学习与延迟回忆训练（AVLT 范式）"],
+  ["LM-03","图像配对","学习与记忆","grid","视觉联想记忆训练：图案—位置配对与再认"],
+  ["LM-04","超市购物","学习与记忆","scene","前瞻记忆与场景记忆训练：按清单寻物 + 稍后执行"],
+  ["LA-01","看图命名","语言","mcq","命名能力训练（BNT 范式）：图片命名与分级提示"],
+  ["LA-02","词汇风暴","语言","recall","言语流畅性训练：类别 / 首字限时生成"],
+  ["LA-03","词图匹配","语言","mcq","语义理解训练：词图配对 / 同义反义 / 语义归类"],
+  ["LA-04","听指令行动","语言","mcq","听理解与复述训练（TTS 播报指令）"],
+  ["VP-01","火眼金睛","视结构-知觉能力","mcq","视知觉辨别训练：异同判断 / 残缺补全 / 重叠拆分"],
+  ["VP-02","巧手拼搭","视结构-知觉能力","mcq","视空间构建训练：方块拼图 / 立方体计数 / 七巧板"],
+  ["VP-03","空间旋转","视结构-知觉能力","mcq","心理旋转与空间记忆训练：旋转 / 镜像匹配与路线重现"],
+  ["VP-04","妙笔临摹","视结构-知觉能力","canvas","视觉运动整合训练：触屏临摹（要素判定）"],
+  ["SC-01","察言观色","社会认知","mcq","面部情绪识别训练：表情类别与强度辨析"],
+  ["SC-02","心有灵犀","社会认知","mcq","心理理论训练：愿望 / 信念 / 意图推断"],
+  ["SC-03","得体应对","社会认知","mcq","社会情境推理训练：社交场景恰当行为选择"],
+  ["SC-04","言外之意","社会认知","mcq","语用与情感理解训练：客套 / 隐喻 / 讽刺判断"]
+];
+let cur = "";
+const bar = document.getElementById("bar");
+bar.innerHTML += `<span class="chip on" data-d="">全部 <span style="opacity:.6">${PROGS.length}</span></span>` +
+  DOMS.map(([d,k]) => `<span class="chip" data-d="${d}">${hsIcon(d)}${d}</span>`).join("");
+bar.addEventListener("click", e => {
+  const c = e.target.closest(".chip"); if (!c) return;
+  cur = c.dataset.d;
+  bar.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === c));
+  render();
+});
+function render(){
+  const body = document.getElementById("body");
+  body.innerHTML = DOMS.filter(([d]) => !cur || d === cur).map(([d, k, note]) => {
+    const list = PROGS.filter(p => p[2] === d);
+    return `<div class="dom-h">
+      <span class="de" style="background:var(--${k}-bg);color:var(--${k})">${hsIcon(d)}</span>
+      <b>${d}</b><span class="cnt">${list.length} 个方案</span>
+      <span class="dn">${note}</span></div>
+      <div class="grid">${list.map(([code, name, , arch, desc]) => `
+        <a class="pcard" href="${code}.html">
+          <div class="cover" style="background:var(--${k}-bg)">
+            <span class="lv">10 关</span>
+            <span class="tile" style="color:var(--${k})">${hsIcon(code)}</span>
+          </div>
+          <div class="pb"><div class="n">${name}</div><div class="c">${code} · ${arch}</div>
+          <div class="d">${desc}</div>
+          <div class="lvlbar">${Array.from({length:10}, (_, i) => `<span style="background:var(--${k});opacity:${(0.22 + i * 0.075).toFixed(2)}"></span>`).join("")}</div>
+          </div></a>`).join("")}</div>`;
+  }).join("");
+}
+render();
+</script>
+</body></html>

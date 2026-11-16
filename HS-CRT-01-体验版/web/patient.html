@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0e9f8a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>认知功能训练软件</title>
+<link rel="stylesheet" href="/common.css"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/theme.css">
+<script src="/icons.js"></script>
+</head><body class="patient">
+<div id="app"></div>
+<script>
+/* ============ 患者端 SPA（对应原型 P1–P6 / SRS FR-P 系列） ============ */
+const API = {
+  tk: localStorage.getItem("hs_ptk") || "",
+  async req(url, opt = {}) {
+    const r = await fetch("/api/v1" + url, { ...opt, headers: { "Content-Type": "application/json", Authorization: "Bearer " + this.tk }, body: opt.body ? JSON.stringify(opt.body) : undefined });
+    if (r.status === 401) { API.tk = ""; localStorage.removeItem("hs_ptk"); location.hash = "#/login"; throw new Error("未登录或会话已过期"); }
+    const j = await r.json();
+    if (j.code !== 0) throw new Error(j.message);
+    return j.data;
+  },
+  get: u => API.req(u), post: (u, b) => API.req(u, { method: "POST", body: b }),
+};
+let ME = null;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function toast(m, ok) { const t = document.createElement("div"); t.className = "toast " + (ok === false ? "err" : ok === true ? "ok" : ""); t.textContent = m; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); }
+const rnd = a => a[Math.floor(Math.random() * a.length)];
+const shuffle = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+function speak(t) { try { const u = new SpeechSynthesisUtterance(t); u.lang = "zh-CN"; u.rate = 0.95; speechSynthesis.cancel(); speechSynthesis.speak(u); } catch (e) {} }
+/* ---------- H5 外壳 ---------- */
+const SHELL = { title: "任务", tab: "tasks", back: "" };
+const TIC = {
+  tasks: '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="17" rx="3"/><path d="M8 3.5h8M8 10h8M8 14.5h5"/></svg>',
+  records: '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18"/><path d="M6.5 20v-6M12 20V6M17.5 20v-9"/></svg>',
+  me: '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.6 20a7.4 7.4 0 0 1 14.8 0"/></svg>',
+};
+const TABS = [["#/tasks", "tasks", "任务"], ["#/records", "records", "记录"], ["#/me", "me", "我的"]];
+const tabbar = () => `<nav class="h5-tabs">${TABS.map(([h, k, n]) =>
+  `<a href="${h}" class="${SHELL.tab === k ? "on" : ""}"><span class="ic">${TIC[k]}</span>${n}</a>`).join("")}</nav>`;
+function pad(inner) {
+  document.getElementById("app").innerHTML = `<div class="h5">
+    <div class="h5-top pbar">
+      ${SHELL.back ? `<button class="back" onclick="location.hash='${SHELL.back}'">‹</button>` : ""}
+      <div class="hd">
+        <span class="ttl" id="ptitle">${esc(SHELL.title)}</span>
+        <span class="sub" id="psub"></span>
+      </div>
+    </div>
+    <div class="h5-body" id="pbody">${inner}</div>
+    ${tabbar()}
+  </div>`;
+  return $("#pbody");
+}
+/* 副标题只放当前进度（如「顺背 5 位」），标题栏居中 */
+const setPad = (title, sub) => {
+  const t = $("#ptitle"); if (t) t.innerHTML = title;
+  const s = $("#psub");
+  if (s) s.textContent = sub === undefined ? "" : String(sub).replace(/^[\s　]+/, "").trim();
+};
+
+/* ---------- 登录 ---------- */
+async function loadMe() {
+  const p = await API.get("/my/profile");
+  ME = {
+    id: p.id, name: p.name, no: p.outpatient_no, acct: p.account, refId: p.id,
+    sex: p.sex, dept: p.dept, birth: p.birth_date, edu: p.education,
+    guardian: p.guardian, isFamily: p.isFamily, operator: p.operator,
+    phone: p.phone || "",
+  };
+  return ME;
+}
+async function ssoLogin(ticket) {
+  if (!ticket) return loginView("登录码无效，请向医务人员重新获取");
+  try {
+    const d = await API.post("/auth/ticket-login", { ticket });
+    API.tk = d.token; localStorage.setItem("hs_ptk", d.token);
+    await loadMe();
+    history.replaceState(null, "", "#/tasks");
+    tasksView();
+  } catch (e) { loginView(e.message); }
+}
+/* 登录：任务账号 + 密码 */
+const REMEMBER_KEY = "hs_remember_patient";
+const b64e = (v) => btoa(String.fromCharCode(...new TextEncoder().encode(v)));
+const b64d = (v) => { try { return new TextDecoder().decode(Uint8Array.from(atob(v), c => c.charCodeAt(0))); } catch (e) { return ""; } };
+const ICO_USER = '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.6 20a7.4 7.4 0 0 1 14.8 0"/></svg>';
+const ICO_LOCK = '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.6"/><path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7"/></svg>';
+const ICO_EYE = '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="2.9"/></svg>';
+const ICO_EYE_OFF = '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l16 16"/><path d="M9.6 6.2A9.4 9.4 0 0 1 12 5.8c6 0 9.5 6.2 9.5 6.2a17 17 0 0 1-3.1 3.9"/><path d="M6.3 8.1A17 17 0 0 0 2.5 12S6 18.2 12 18.2a9.2 9.2 0 0 0 3.5-.7"/></svg>';
+function loginView(msg = "") {
+  let rem = false, u = "", pw = "";
+  try {
+    const raw = localStorage.getItem(REMEMBER_KEY);
+    if (raw) { const o = JSON.parse(raw); if (o && o.u) { u = o.u; pw = b64d(o.p || ""); rem = true; } }
+  } catch (e) { }
+  document.getElementById("app").innerHTML = `<div class="pt-login">
+    <div class="pl-body">
+      <div class="pl-logo"><img src="/assets/logo.png" alt=""></div>
+      <div class="pl-name">认知功能训练软件</div>
+      <div class="pl-field"><span class="ico">${ICO_USER}</span>
+        <input id="lu" placeholder="任务账号" autocomplete="username" value="${esc(u)}"></div>
+      <div class="pl-field"><span class="ico">${ICO_LOCK}</span>
+        <input id="lpw" type="password" placeholder="密码" autocomplete="current-password" value="${esc(pw)}">
+        <button class="eye" id="leye" type="button">${ICO_EYE}</button></div>
+      <label class="pl-remember"><input type="checkbox" id="lrem" ${rem ? "checked" : ""}><span>记住密码</span></label>
+      <button class="pl-btn" id="lgo">登 录</button>
+      <div class="pl-err" id="lerr">${esc(msg)}</div>
+    </div>
+  </div>`;
+
+  let shown = false;
+  $("#leye").onclick = () => {
+    shown = !shown;
+    $("#lpw").type = shown ? "text" : "password";
+    $("#leye").innerHTML = shown ? ICO_EYE_OFF : ICO_EYE;
+  };
+  const submit = async () => {
+    const acct = $("#lu").value.trim(), pass = $("#lpw").value;
+    if (!acct || !pass) { $("#lerr").textContent = "请输入任务账号与密码"; return; }
+    try {
+      const d = await API.post("/auth/login", { username: acct, password: pass });
+      if (d.user.role !== "patient" && d.user.role !== "family") return toast("请使用患者端登录患者账号", false);
+      try {
+        if ($("#lrem").checked) localStorage.setItem(REMEMBER_KEY, JSON.stringify({ u: acct, p: b64e(pass) }));
+        else localStorage.removeItem(REMEMBER_KEY);
+      } catch (e) { }
+      API.tk = d.token; localStorage.setItem("hs_ptk", d.token);
+      await loadMe();
+      location.hash = "#/tasks";
+    } catch (e) { $("#lerr").textContent = e.message; }
+  };
+  $("#lgo").onclick = submit;
+  $("#lpw").addEventListener("keyup", e => { if (e.key === "Enter") submit(); });
+  // 取消勾选即清除本地记录，与医生端 / 管理端一致
+  $("#lrem").addEventListener("change", () => {
+    if ($("#lrem").checked) return;
+    try { localStorage.removeItem(REMEMBER_KEY); } catch (e) { }
+  });
+}
+
+/* ---------- 首页：今日任务（P2） ---------- */
+async function tasksView() {
+  SHELL.title = "今日任务"; SHELL.tab = "tasks"; SHELL.back = "";
+  const r = await API.get("/my/tasks");
+  const plans = r.planItems || [];
+  const today = new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" });
+  /* 任务不按天分配：按方案频次给出本周进度，达标后提示但不禁用训练 */
+  const wk = r.week || { done: 0, target: 0 };
+  const quota = wk.target ? `本周 ${wk.done}/${wk.target} 次` : "";
+  const reached = wk.target > 0 && wk.done >= wk.target;
+
+  const row = (code, title, meta, action, hash, primary) => `<div class="pcard ptask">
+    <span class="ic">${hsIcon(code)}</span>
+    <div class="tx"><b>${title}</b><div class="muted">${meta}</div></div>
+    <button class="pbtn ${primary ? "primary " : ""}sm" onclick="location.hash='${hash}'">${action}</button>
+  </div>`;
+
+  pad(`
+    <div class="pcard" style="display:flex;align-items:center;gap:12px;background:linear-gradient(120deg,#e9f8f5,#f7fbfa);border-color:#d5ece6">
+      <div class="avatar">${esc(ME.name[0])}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:16px;font-weight:600">${esc(ME.name)}</div>
+        <div class="muted">${today}${quota ? " · " + quota : ""}</div>
+      </div>
+    </div>
+
+    ${reached ? `<div class="pcard" style="display:flex;align-items:center;gap:9px;padding:11px 14px;background:var(--c-primary-soft);border-color:transparent">
+      <span style="display:inline-flex;color:var(--c-primary-active)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.4l2.6 2.6L16 9.6"/></svg></span>
+      <span style="font-size:13px;color:var(--c-primary-active);line-height:1.5">本周训练已完成 ${wk.done}/${wk.target} 次，可继续巩固</span>
+    </div>` : ""}
+
+    <div class="psec"><span class="si">${hsIcon("CA-01")}</span>训练任务 <span class="cnt">${plans.length ? plans.length + " 项 · 医生方案" : "暂无"}</span></div>
+    ${plans.length ? plans.map(t => row(t.program, esc(t.program) + " " + esc(t.name), "第 " + t.level + " 关 · " + esc(t.desc || ""), "开始", `#/train/${t.planId}/${t.program}`, true)).join("")
+      : `<div class="pcard" style="text-align:center;padding:18px;color:var(--c-text-3);font-size:13px">暂无训练方案，请等待医生安排</div>`}
+
+    <div class="psec"><span class="si">${hsIcon("LM-02")}</span>我的记录</div>
+    ${row("MoCA", "训练记录", "查看完成情况与本周进度", "查看", "#/records")}
+  `);
+  setPad("今日任务");
+}
+
+/* ---------- 我的（H5 第三页签） ---------- */
+async function meView() {
+  SHELL.title = "我的"; SHELL.tab = "me"; SHELL.back = "";
+  const age = ME.birth ? Math.floor((Date.now() - new Date(ME.birth)) / 31557600000) : "";
+  pad(`
+    <div class="pcard" style="display:flex;align-items:center;gap:12px">
+      <div class="avatar">${esc(ME.name[0])}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:17px;font-weight:600">${esc(ME.name)}</div>
+        <div class="muted">任务账号 ${esc(ME.acct || ME.no)}</div>
+      </div>
+      ${ME.isFamily ? `<span style="font-size:11.5px;padding:2px 9px;border-radius:99px;background:var(--c-info-soft);color:var(--c-info);flex-shrink:0">家属代操作</span>` : ""}
+    </div>
+    ${ME.isFamily ? `<div class="muted" style="margin:-6px 0 10px;font-size:12px">当前由 ${esc(ME.operator)} 代为操作</div>` : ""}
+    <div class="pcard" style="padding:4px 14px">
+      ${[["性别", ME.sex || "—"], ["年龄", age ? age + " 岁" : "—"], ["教育程度", ME.edu || "—"], ["科室", ME.dept || "—"], ["联系人", ME.guardian || "—"]]
+        .map(([k, v]) => `<div style="display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--c-line);font-size:14px">
+          <span style="color:var(--c-text-3)">${k}</span><span>${esc(String(v))}</span></div>`).join("")}
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;font-size:14px">
+        <span style="color:var(--c-text-3)">手机号</span>
+        <span>${ME.phone ? esc(ME.phone.slice(0, 3) + "****" + ME.phone.slice(-4)) : "—"}</span>
+      </div>
+    </div>
+    <button class="pbtn xl" onclick="logout()" style="color:var(--c-danger);border-color:#f0cfcc">退出登录</button>
+  `);
+  setPad("我的");
+}
+function logout() {
+  API.tk = ""; localStorage.removeItem("hs_ptk"); ME = null;
+  location.hash = "#/login"; loginView();
+}
+
+/* ---------- 范式执行（P3/P4 · 12项引擎） ---------- */
+const PARA_STATE = {};
+async function paraView(recordId, code) {
+  const rec = await API.get("/assessments/" + recordId);
+  const meta = BANK.paradigms.find(p => p.code === code);
+  PARA_STATE.recordId = recordId; PARA_STATE.code = code; PARA_STATE.raw = {};
+  SHELL.title = "评估任务"; SHELL.tab = "tasks"; SHELL.back = "#/tasks";
+  pad(`<div class="pcard center" style="padding:22px 16px">
+      <div class="para-ico">${hsIcon(code)}</div>
+      <div style="font-size:18px;font-weight:600">${esc(meta.name)}</div>
+      <div style="font-size:13px;color:var(--c-text-2);line-height:1.8">${esc(meta.desc)}<br>约 ${meta.minutes} 分钟</div>
+      <button class="pbtn primary xl" id="go">开 始</button>
+      <div class="muted">请在医务人员指导下进行；过程中可随时请工作人员帮助</div>
+    </div>`);
+  setPad("评估任务", "　" + meta.name);
+  $("#go").onclick = () => RUNNER[code] ? RUNNER[code]() : toast("该范式即将上线", false);
+}
+const BANK = { paradigms: null, trainings: null };
+async function ensureBanks() { if (!BANK.paradigms) { const b = await API.get("/banks"); BANK.paradigms = b.paradigms; BANK.trainings = b.trainings; } }
+const t0 = () => performance.now();
+function paraDone() {
+  const s = PARA_STATE;
+  return API.post(`/assessments/${s.recordId}/paradigm`, { code: s.code, raw: s.raw })
+    .then(() => { toast("任务完成，已提交", true); location.hash = "#/tasks"; })
+    .catch(e => toast(e.message, false));
+}
+function resultView(title, lines, onDone) {
+  pad(`<div class="pcard center" style="padding:24px 16px">
+      <div class="ok-ico"></div>
+      <div style="font-size:18px;font-weight:600">${esc(title)}</div>
+      ${lines.map(l => `<div style="font-size:14px;color:var(--c-text-2)">${esc(l)}</div>`).join("")}
+      <button class="pbtn primary xl" id="fin">完成并提交</button>
+    </div>`);
+  setPad("任务完成");
+  $("#fin").onclick = onDone;
+}
+
+/* —— 各范式引擎 —— */
+const RUNNER = {
+  /* 数字广度 SPAN */
+  span() {
+    const st = { part: "fwd", len: 3, tries: 0, fwd: 0, bwd: 0, cur: [], input: "" };
+    function next() {
+      if (st.part === "fwd" && st.len > 9) { st.part = "bwd"; st.len = 3; }
+      if (st.part === "bwd" && st.len > 8) return result();
+      st.cur = Array.from({ length: st.len }, () => Math.floor(Math.random() * 10));
+      st.input = "";
+      const box = pad(`<div class="pcard center"><div class="muted">${st.part === "fwd" ? "请按顺序记住并输入数字" : "请【倒着】输入刚才的数字"}</div>
+        <div class="stim" id="dg">·</div><div id="kb"></div></div>`);
+      setPad("数字广度", `　${st.part === "fwd" ? "顺背" : "倒背"} ${st.len} 位`);
+      let i = 0;
+      const show = () => {
+        if (i >= st.cur.length) { speak(""); return input(); }
+        $("#dg").textContent = st.cur[i]; speak(String(st.cur[i]));
+        i++; setTimeout(() => { $("#dg").textContent = "·"; setTimeout(show, 350); }, 700);
+      };
+      setTimeout(show, 500);
+    }
+    function input() {
+      const kb = $("#kb");
+      kb.innerHTML = `<div class="stim" style="font-size:34px;letter-spacing:6px" id="inp">${st.input || "　"}</div>
+        <div class="row">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map(n => `<button class="pbtn sm" data-k="${n}">${n}</button>`).join("")}</div>
+        <div class="row"><button class="pbtn sm" id="del">删除</button><button class="pbtn primary" id="ok2">确定</button></div>`;
+      kb.querySelectorAll("[data-k]").forEach(b => b.onclick = () => { st.input += b.dataset.k; $("#inp").textContent = st.input; });
+      $("#del").onclick = () => { st.input = st.input.slice(0, -1); $("#inp").textContent = st.input || "　"; };
+      $("#ok2").onclick = () => {
+        const target = st.part === "fwd" ? st.cur.join("") : [...st.cur].reverse().join("");
+        const right = st.input === target;
+        st.tries++;
+        if (right) { st[st.part] = Math.max(st[st.part], st.len); }
+        if (st.tries >= 2) {
+          if (!right) { // 两位均错 → 结束本部分
+            if (st.part === "fwd") { st.part = "bwd"; st.len = 3; } else return result();
+            st.len = right ? st.len + 1 : st.len; st.tries = 0; next(); return;
+          }
+          st.len++; st.tries = 0;
+        }
+        next();
+      };
+    }
+    function result() {
+      PARA_STATE.raw = { fwd: st.fwd, bwd: st.bwd };
+      resultView("数字广度完成", [`顺背广度：${st.fwd} 位`, `倒背广度：${st.bwd} 位`], paraDone);
+    }
+    next();
+  },
+  /* 持续操作 CPT */
+  cpt() {
+    const cfg = { isi: 1100, trials: 60, targetRatio: 0.25 };
+    const letters = "BBFKLMMTX".split("");
+    let i = 0, targets = 0, hits = 0, rts = [], missed = 0, shown = null, shownAt = 0, answered = false;
+    pad(`<div class="pcard center"><div class="muted">看到 <b style="color:#dc2626">X</b> 就尽快点击按钮，其他字母不要点</div>
+      <div class="stim" id="s">·</div><button class="pbtn primary xl" id="hit" style="min-width:280px">看 到 X 按 我</button></div>`);
+    setPad("信号捕捉");
+    $("#hit").onclick = () => {
+      if (shown === "X" && !answered) { hits++; rts.push(performance.now() - shownAt); answered = true; $("#s").style.background = "#dcfce7"; }
+    };
+    const loop = () => {
+      if (i >= cfg.trials) {
+        PARA_STATE.raw = { hits, targets, avgRt: rts.length ? rts.reduce((a, b) => a + b) / rts.length : 0, missed };
+        return resultView("信号捕捉完成", [`命中 ${hits}/${targets}`, `漏报 ${missed}`, `平均反应时 ${Math.round(PARA_STATE.raw.avgRt)}ms`], paraDone);
+      }
+      shown = Math.random() < cfg.targetRatio ? "X" : rnd(letters.filter(l => l !== "X"));
+      if (shown === "X") targets++;
+      answered = false; $("#s").style.background = "#fff"; $("#s").textContent = shown; shownAt = performance.now();
+      setTimeout(() => {
+        if (shown === "X" && !answered) { missed++; $("#s").style.background = "#fee2e2"; }
+        i++; setTimeout(loop, 150);
+      }, 900);
+    };
+    setTimeout(loop, 800);
+  },
+  /* 符号数字 SDMT */
+  sdmt() {
+    const pairs = [["◆", 1], ["●", 2], ["▲", 3], ["■", 4], ["★", 5], ["✚", 6], ["⊙", 7], ["◇", 8], ["♠", 9]];
+    const seq = Array.from({ length: 60 }, () => rnd(pairs)[0]);
+    let idx = 0, count = 0; const start = performance.now();
+    pad(`<div class="pcard center"><div class="row" style="justify-content:center;gap:8px;font-size:22px">${pairs.map(p => `<span>${p[0]}=${p[1]}</span>`).join("　")}</div>
+      <div class="stim" id="s">·</div><div class="row" id="pad"></div><div class="muted" id="tm"></div></div>`);
+    setPad("符号配对");
+    $("#pad").innerHTML = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button class="pbtn" data-d="${n}" style="width:70px">${n}</button>`).join("");
+    const timer = setInterval(() => {
+      const left = 90 - Math.floor((performance.now() - start) / 1000);
+      $("#tm").textContent = "剩余 " + left + " 秒 · 已正确 " + count;
+      if (left <= 0) {
+        clearInterval(timer); PARA_STATE.raw = { count };
+        resultView("符号配对完成", [`90秒正确配对数：${count}`], paraDone);
+      }
+    }, 500);
+    $("#pad").querySelectorAll("[data-d]").forEach(b => b.onclick = () => {
+      if (idx >= seq.length) return;
+      if (pairs.find(p => p[0] === seq[idx])[1] === +b.dataset.d) count++;
+      idx++; $("#s").textContent = seq[idx] || "✓";
+    });
+    $("#s").textContent = seq[0];
+  },
+  /* 连线 TMT */
+  tmt() {
+    const st = { part: "A", seq: [], idx: 0, t0: 0, timeA: 0, timeB: 0, errors: 0 };
+    const W = 640, H = 380;
+    function build(part) {
+      const labels = part === "A" ? Array.from({ length: 8 }, (_, i) => String(i + 1))
+        : Array.from({ length: 8 }, (_, i) => i % 2 === 0 ? String(i / 2 + 1) : "甲乙丙丁"[Math.floor(i / 2)]);
+      st.seq = labels; st.idx = 0;
+      const nodes = labels.map((_, i) => ({ x: 60 + (i % 4) * 140 + Math.random() * 50, y: 60 + Math.floor(i / 4) * 130 + Math.random() * 60 }));
+      const shuffled = shuffle(nodes);
+      const box = pad(`<div class="pcard"><div class="muted">${part === "A" ? "按 1→2→…→8 顺序点击" : "按 1→甲→2→乙…交替点击"}，越快越好</div>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%" id="svg"></svg></div>`);
+      setPad("连线测试", `　${part} 型`);
+      const svg = $("#svg");
+      shuffled.forEach((n, i) => {
+        const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        c.setAttribute("cx", n.x); c.setAttribute("cy", n.y); c.setAttribute("r", 26); c.setAttribute("fill", "#eff6ff"); c.setAttribute("stroke", "#2563eb");
+        const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        t.setAttribute("x", n.x); t.setAttribute("y", n.y + 6); t.setAttribute("text-anchor", "middle"); t.setAttribute("font-size", 18); t.textContent = labels[i];
+        c.style.cursor = "pointer"; c.dataset.label = labels[i];
+        c.onclick = () => {
+          if (c.dataset.label === st.seq[st.idx]) {
+            c.setAttribute("fill", "#dcfce7"); st.idx++;
+            if (st.idx >= st.seq.length) {
+              const dt = (performance.now() - st.t0) / 1000;
+              if (part === "A") { st.timeA = dt; build("B"); } else { st.timeB = dt; result(); }
+            }
+          } else { st.errors++; c.setAttribute("fill", "#fee2e2"); setTimeout(() => c.setAttribute("fill", "#eff6ff"), 300); }
+        };
+        svg.appendChild(c); svg.appendChild(t);
+      });
+      st.t0 = performance.now();
+    }
+    function result() {
+      PARA_STATE.raw = { timeA: st.timeA, timeB: st.timeB, errors: st.errors };
+      resultView("连线测试完成", [`A型：${Math.round(st.timeA)}秒`, `B型：${Math.round(st.timeB)}秒`, `点击错误 ${st.errors} 次`], paraDone);
+    }
+    build("A");
+  },
+  /* Stroop */
+  stroop() {
+    const colors = [["红", "#dc2626"], ["蓝", "#2563eb"], ["绿", "#16a34a"], ["黄", "#d97706"]];
+    let i = 0; const raw = { congN: 0, congCorrect: 0, congRt: 0, incongN: 0, incongCorrect: 0, incongRt: 0 };
+    const total = 36;
+    function trial() {
+      if (i >= total) {
+        PARA_STATE.raw = raw;
+        return resultView("色词任务完成", [`一致正确率 ${Math.round(raw.congCorrect / Math.max(raw.congN, 1) * 100)}%`,
+          `不一致正确率 ${Math.round(raw.incongCorrect / Math.max(raw.incongN, 1) * 100)}%`,
+          `干扰量 ${Math.round((raw.incongRt / Math.max(raw.incongN, 1)) - (raw.congRt / Math.max(raw.congN, 1)))}ms`], paraDone);
+      }
+      const incong = i % 2 === 1;
+      const word = rnd(colors)[0]; let ink;
+      if (incong) { ink = rnd(colors.filter(c => c[0] !== word))[0]; } else ink = colors.find(c => c[0] === word)[1];
+      (incong ? raw.incongN++ : raw.congN++);
+      const box = pad(`<div class="pcard center"><div class="muted">请按【文字的颜色】选择，不要按字的意思</div>
+        <div class="stim" style="color:${ink}">${word}</div><div class="row" id="bs"></div></div>`);
+      setPad("色词任务", `　第 ${i + 1}/${total} 题`);
+      const t0 = performance.now();
+      $("#bs").innerHTML = colors.map(c => `<button class="colorbtn" style="background:${c[1]}" data-c="${c[0]}">${c[0]}</button>`).join("");
+      
+      // 不一致条件下正确判定：点击颜色===ink
+      $("#bs").querySelectorAll("[data-c]").forEach(b => b.onclick = () => {
+        const rt = performance.now() - t0;
+        const correct = b.dataset.c === ink;
+        if (incong) { raw.incongRt += rt; raw.incongCorrect += correct ? 1 : 0; }
+        else { raw.congRt += rt; raw.congCorrect += correct ? 1 : 0; }
+        i++; setTimeout(trial, 250);
+      });
+    }
+    trial();
+  },
+  /* 伦敦塔 TOL */
+  tol() {
+    const items = [
+      { start: { A: [0, 1], B: [], C: [2] }, goal: { A: [2], B: [0], C: [1] } },
+      { start: { A: [2], B: [0, 1], C: [] }, goal: { A: [], B: [2], C: [0, 1] } },
+      { start: { A: [0, 1, 2], B: [], C: [] }, goal: { A: [1], B: [0], C: [2] } },
+      { start: { A: [1, 2], B: [], C: [0] }, goal: { A: [0], B: [2], C: [1] } },
+    ];
+    let k = 0, solved = 0, moves = 0, need = 0, t0 = performance.now(), timeAll = 0, sel = null;
+    const colName = ["🔴 红", "🟢 绿", "🟡 黄"];
+    function render() {
+      const it = items[k]; need = it.start.A.length + it.start.B.length + it.start.C.length;
+      pad(`<div class="pcard center"><div class="muted">点击木桩选中顶部彩球，再点击目标木桩移动；摆成下方目标样子</div>
+        <div class="row" style="justify-content:center;gap:30px" id="goal"></div>
+        <div class="row" style="justify-content:center;gap:30px;margin-top:14px" id="board"></div>
+        <div class="muted">第 ${k + 1}/${items.length} 题 · 已移动 ${moves} 步（最优约 ${need} 步）</div></div>`);
+      setPad("宝塔规划", `　第 ${k + 1} 题`);
+      const draw = (cfg, el, goalMode) => {
+        el.innerHTML = ["A", "B", "C"].map((peg, pi) => `<div style="text-align:center">
+          <div style="height:120px;display:flex;flex-direction:column-reverse;align-items:center;gap:4px">
+            ${cfg[peg].map(b => `<div style="width:54px;height:34px;border-radius:8px;background:${["#dc2626", "#16a34a", "#d97706"][b]};${sel === peg && !goalMode && b === cfg[peg][cfg[peg].length - 1] ? "outline:3px solid #2563eb" : ""}"></div>`).join("")}
+            <div style="width:70px;height:8px;background:#94a3b8;border-radius:4px"></div>
+            <div style="font-size:12px" class="muted">${"ABC"[pi]}</div></div></div>`).join("");
+        if (!goalMode) ["A", "B", "C"].forEach((peg, pi) => el.children[pi].onclick = () => act(peg));
+      };
+      draw(it.goal, $("#goal"), true); draw(it.start, $("#board"), false);
+      function act(peg) {
+        if (sel === null) { if (it.start[peg].length) sel = peg; }
+        else if (sel === peg) sel = null;
+        else {
+          const b = it.start[sel].pop();
+          if (b !== undefined && it.start[peg].length < 3) it.start[peg].push(b); else it.start[sel].push(b);
+          sel = null; moves++;
+          if (JSON.stringify(it.start) === JSON.stringify(it.goal)) {
+            solved++; timeAll += (performance.now() - t0) / 1000;
+            k++;
+            if (k >= items.length) {
+              PARA_STATE.raw = { solved, total: items.length, extraMoves: Math.max(0, moves - items.reduce((a, i2) => a + i2.start.A.length + i2.start.B.length + i2.start.C.length, 0)), time: timeAll };
+              return resultView("宝塔规划完成", [`完成 ${solved}/${items.length} 题`, `共用时 ${Math.round(timeAll)} 秒`], paraDone);
+            }
+            moves = 0; t0 = performance.now();
+          }
+        }
+        render();
+      }
+    }
+    render();
+  },
+  /* AVLT */
+  avlt() {
+    const cfg = BANK.paradigms.find(p => p.code === "AVLT").cfg;
+    const st = { imm1: 0, immB: 0, delay: 0, recog: 0, recogAcc: 0 };
+    const countMatch = (input, list) => {
+      const words = input.split(/[，,、\s]+/).map(w => w.trim()).filter(Boolean);
+      return words.filter(w => list.some(l => l === w || l.includes(w) || w.includes(l))).length;
+    };
+    function phase1() {
+      const box = pad(`<div class="pcard center"><div class="muted">请认真听词表，结束后尽量说出记住的词（可打字或由工作人员代录）</div>
+        <button class="pbtn primary" id="listen">🔊 播放词表A</button><div id="recall" style="display:none;width:100%">
+        <input id="words" placeholder="用空格或顿号分隔，如：皮球 火车 …" style="width:100%;font-size:15px;padding:12px">
+        <button class="pbtn primary sm" id="ok1" style="margin-top:10px">提交回忆</button></div></div>`);
+      setPad("词表学习", "　第1次");
+      $("#listen").onclick = () => {
+        $("#listen").disabled = true;
+        cfg.listA.forEach((w, i) => setTimeout(() => speak(w), i * 1100));
+        setTimeout(() => { $("#recall").style.display = "block"; }, cfg.listA.length * 1100 + 400);
+      };
+      $("#ok1").onclick = () => {
+        st.imm1 = countMatch($("#words").value, cfg.listA);
+        const box2 = pad(`<div class="pcard center"><div class="muted">现在听第二组词（干扰词表）</div>
+          <button class="pbtn primary" id="listen2">🔊 播放词表B</button><div id="recall2" style="display:none;width:100%">
+          <input id="words2" placeholder="说出/输入词表B记住的词" style="width:100%;font-size:15px;padding:12px">
+          <button class="pbtn primary sm" id="ok2" style="margin-top:10px">提交</button></div></div>`);
+        $("#listen2").onclick = () => {
+          $("#listen2").disabled = true;
+          cfg.listB.forEach((w, i) => setTimeout(() => speak(w), i * 1100));
+          setTimeout(() => $("#recall2").style.display = "block", cfg.listB.length * 1100 + 400);
+        };
+        $("#ok2").onclick = () => {
+          st.immB = countMatch($("#words2").value, cfg.listB);
+          phaseDelay();
+        };
+      };
+    }
+    function phaseDelay() {
+      let left = 60;
+      const box = pad(`<div class="pcard center"><div class="muted">请从100连续减7心算，坚持1分钟后我们要回忆刚才的词表</div>
+        <div class="stim" id="cd">60</div><div class="muted">计算提示：100−7=93，93−7=86 …</div></div>`);
+      setPad("延迟回忆", "　等待中");
+      const iv = setInterval(() => {
+        left--; $("#cd").textContent = left;
+        if (left <= 0) {
+          clearInterval(iv);
+          pad(`<div class="pcard center"><div class="muted">请回忆第一组词表（皮球、国旗、树木、咖啡…）</div>
+            <input id="dw" placeholder="用空格分隔" style="width:100%;font-size:15px;padding:12px">
+            <button class="pbtn primary sm" id="ok3" style="margin-top:10px">提交回忆</button></div>`);
+          $("#ok3").onclick = () => {
+            st.delay = countMatch($("#dw").value, cfg.listA);
+            phaseRecog();
+          };
+        }
+      }, 1000);
+    }
+    function phaseRecog() {
+      const items = shuffle([...cfg.listA.map(w => [w, 1]), ...cfg.foils.map(w => [w, 0])]);
+      let i = 0;
+      const ask = () => {
+        if (i >= items.length) {
+          PARA_STATE.raw = { imm1: st.imm1, immB: st.immB, delay: st.delay, recog: st.recog, recogAcc: st.recog };
+          return resultView("词表学习完成", [`第1次即刻回忆：${st.imm1}/12`, `干扰后回忆：${st.immB}/12`, `延迟回忆：${st.delay}/12`, `再认正确：${st.recog} 项`], paraDone);
+        }
+        pad(`<div class="pcard center"><div class="muted">这个词刚才出现过吗？</div><div class="stim" style="font-size:38px">${items[i][0]}</div>
+          <div class="row"><button class="pbtn" id="no">没出现过</button><button class="pbtn primary" id="yes">出现过</button></div>
+          <div class="muted">再认 ${i + 1}/${items.length}</div></div>`);
+        $("#yes").onclick = () => { if (items[i][1]) { st.recog++; st.recogAcc++; } else st.recogAcc--; i++; ask(); };
+        $("#no").onclick = () => { if (!items[i][1]) { st.recog++; st.recogAcc++; } else st.recogAcc--; i++; ask(); };
+      };
+      ask();
+    }
+    phase1();
+  },
+  /* 图形再认 REC */
+  rec() {
+    const shapes = ["▲", "◆", "■", "●", "★", "✚", "⊙", "♡", "♠", "☾", "❖", "✦", "▣", "≽", "◐", "⬟"];
+    const cols = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed"];
+    const study = shuffle(shapes).slice(0, 8).map(s => [s, rnd(cols)]);
+    const all = shuffle([...study.map(x => [x, 1]), ...shuffle(shapes.filter(s => !study.some(y => y[0] === s))).slice(0, 8).map(s => [s, 0])]);
+    let i = 0, hits = 0, fa = 0;
+    const studyStep = () => {
+      if (i >= study.length) { i = 0; return ask(); }
+      pad(`<div class="pcard center"><div class="muted">请记住这个图形（${i + 1}/${study.length}）</div>
+        <div class="stim" style="color:${study[i][1]}">${study[i][0]}</div></div>`);
+      setPad("图形记忆", "　学习阶段");
+      setTimeout(() => { i++; studyStep(); }, 2200);
+    };
+    const ask = () => {
+      if (i >= all.length) {
+        PARA_STATE.raw = { hits, fa };
+        return resultView("图形记忆完成", [`命中 ${hits}/8`, `虚报 ${fa}/8`], paraDone);
+      }
+      pad(`<div class="pcard center"><div class="muted">这个图形刚才出现过吗？</div>
+        <div class="stim" style="color:${all[i][0][1]}">${all[i][0][0]}</div>
+        <div class="row"><button class="pbtn" id="no">新的</button><button class="pbtn primary" id="yes">见过</button></div>
+        <div class="muted">再认 ${i + 1}/${all.length}</div></div>`);
+      setPad("图形记忆", "　再认阶段");
+      $("#yes").onclick = () => { if (all[i][1]) hits++; else fa++; i++; ask(); };
+      $("#no").onclick = () => { if (!all[i][1]) { i++; } else { fa++; i++; } ask(); };
+    };
+    studyStep();
+  },
+  /* BNT */
+  bnt() {
+    const cfg = BANK.paradigms.find(p => p.code === "BNT").cfg;
+    const alias = { "大象": "大象", "猫": "猫", "树": "树", "飞机": "飞机", "手表": "手表|腕表", "铅笔": "铅笔", "长颈鹿": "长颈鹿", "章鱼": "章鱼", "蘑菇": "蘑菇", "吉他": "吉他", "菠萝": "菠萝", "骆驼": "骆驼", "猫头鹰": "猫头鹰", "锚": "锚", "狮子": "狮子" };
+    let i = 0, spo = 0, hinted = 0, hintUsed = 0;
+    const ask = () => {
+      if (i >= cfg.items.length) {
+        PARA_STATE.raw = { spo, hinted, hintUsed, total: cfg.items.length };
+        return resultView("命名任务完成", [`自发命名 ${spo}/${cfg.items.length}`, `提示后命名 ${hinted}`], paraDone);
+      }
+      const [emoji, ans] = cfg.items[i];
+      pad(`<div class="pcard center"><div class="stim" style="font-size:96px">${emoji}</div>
+        <input id="nm" placeholder="请说出/输入它的名字" style="width:320px;font-size:17px;padding:12px">
+        <div class="row"><button class="pbtn sm" id="h1">💡 类别提示</button><button class="pbtn sm" id="h2">💡 首字提示</button>
+        <button class="pbtn primary sm" id="ok">确定</button></div>
+        <div class="muted" id="hintbox"></div><div class="muted">第 ${i + 1}/${cfg.items.length} 项</div></div>`);
+      setPad("看图命名", `　第 ${i + 1} 项`);
+      let used = 0;
+      $("#h1").onclick = () => { used = 1; hintUsed++; $("#hintbox").textContent = "类别：" + CATALOG[ans] || ""; speak("类别是" + CATALOG[ans]); };
+      $("#h2").onclick = () => { used = 2; hintUsed++; $("#hintbox").textContent = "第一个字：" + ans[0]; speak("第一个字是" + ans[0]); };
+      $("#ok").onclick = () => {
+        const v = $("#nm").value.trim();
+        if (v && (ans.includes(v) || v.includes(ans) || (alias[ans] || "").split("|").some(a => a && v.includes(a)))) { used === 0 ? spo++ : hinted++; }
+        i++; ask();
+      };
+    };
+    const CATALOG = { "狮子": "动物", "大象": "动物", "猫": "动物", "长颈鹿": "动物", "章鱼": "动物", "骆驼": "动物", "猫头鹰": "动物", "树": "植物", "蘑菇": "植物", "菠萝": "水果", "飞机": "交通工具", "手表": "物品", "铅笔": "文具", "吉他": "乐器", "锚": "船具" };
+    ask();
+  },
+  /* 词语流畅性 FLU */
+  flu() {
+    const LEX = {
+      ANIMAL: "虎牛马羊猪狗猫鼠兔狼豹狮猴鹿象熊狐蛇蛙鱼鸟鸦鸽鹰雁蜂蝶蚁蚕龟虾蟹鲸鲨鹅鸭鸡兔驼狼狸狈豹獭骏驹犬猫狸猩猿犀貘獾驼鲈鲤鲨鳗虾螺蚌蛟恐龙长颈鹿袋鼠考拉熊猫河马斑马骡驴骡蚱蜢萤火虫啄木鸟猫头鹰蝙蝠刺猬松鼠水獭海豚海豹企鹅北极狐".split(/(?<=.)./).filter(w => w.length >= 1),
+      DA: "大小多高长好快强大山河水大学大夫大家大米大脑大王大地大气大师大厦大海大河大会大声大方大力大战大个子大自然大熊猫大动脉大丈夫大本营大运河大礼堂大显身手大公无私大同小异大惊小怪大器晚成大智若愚大张旗鼓大刀阔斧大快人心大名鼎鼎大势所趋大有作为大展宏图大庭广众大摇大摆大义凛然大禹治水".match(/大.{0,2}|大/g).filter(w => w.startsWith("大")),
+    };
+    let part = 0; const counts = { animal: 0, da: 0 };
+    const run = () => {
+      const [label, key] = part === 0 ? ["动物名称（如：老虎）", "ANIMAL"] : ["以“大”开头的词语（如：大山）", "DA"];
+      const got = new Set(); let left = 60; const start = performance.now();
+      pad(`<div class="pcard center"><div class="muted">请在60秒内尽量多地说出/输入不同的词（工作人员可协助输入）</div>
+        <div style="font-size:22px;font-weight:800">类别：${label}</div>
+        <div class="row"><input id="w" placeholder="输入一个词后回车" style="width:280px;font-size:16px;padding:12px">
+        <button class="pbtn primary sm" id="add">加入</button></div>
+        <div class="stim" style="font-size:30px" id="cd">60</div><div class="muted" id="cnt">已说 0 个</div></div>`);
+      setPad("词汇风暴", `　${part + 1}/2`);
+      const iv = setInterval(() => {
+        left = Math.max(0, 60 - Math.floor((performance.now() - start) / 1000));
+        $("#cd").textContent = left; $("#cnt").textContent = "已说 " + got.size + " 个";
+        if (left <= 0) {
+          clearInterval(iv); counts[part === 0 ? "animal" : "da"] = got.size; part++;
+          if (part >= 2) {
+            PARA_STATE.raw = counts;
+            resultView("词汇任务完成", [`动物词数：${counts.animal}`, `“大”字词数：${counts.da}`], paraDone);
+          } else run();
+        }
+      }, 500);
+      const addW = () => {
+        const v = $("#w").value.trim(); if (!v) return;
+        const okw = key === "ANIMAL" ? LEX.ANIMAL.some(x => v.includes(x) || x.includes(v)) : v.startsWith("大");
+        if (okw) got.add(v); else toast("这个词好像不属于该类别，试试别的", false);
+        $("#w").value = ""; $("#w").focus();
+      };
+      $("#add").onclick = addW;
+      $("#w").onkeydown = e => { if (e.key === "Enter") addW(); };
+    };
+    run();
+  },
+  /* 画钟 / 临摹 CDT、COPY */
+  canvas() {
+    const code = PARA_STATE.code;
+    const cfg = BANK.paradigms.find(p => p.code === code).cfg;
+    pad(`<div class="pcard"><div style="font-size:17px;font-weight:800;text-align:center">${esc(cfg.prompt)}</div>
+      <canvas class="board" id="cv" height="420"></canvas>
+      <div class="row" style="justify-content:center;margin-top:10px">
+        <button class="pbtn sm" id="undo">↩ 撤销</button><button class="pbtn sm" id="clr">🗑 清除</button>
+        <button class="pbtn primary" id="fin2">画好了，提交</button></div>
+      <div class="muted" style="text-align:center">提交后由医生进行要素复核评分</div></div>`);
+    setPad("手写作答");
+    const cv = $("#cv"); cv.width = $("#padbox").clientWidth - 80;
+    const ctx = cv.getContext("2d"); ctx.lineWidth = 4; ctx.lineCap = "round"; ctx.strokeStyle = "#0f172a";
+    let drawing = false, strokes = 0, cur = null;
+    const allStrokes = [];
+    const pos = e => { const r = cv.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e; return [t.clientX - r.left, t.clientY - r.top]; };
+    const start = e => { drawing = true; cur = [pos(e)]; allStrokes.push(cur); e.preventDefault(); };
+    const move = e => { if (!drawing) return; cur.push(pos(e)); const p = cur; ctx.beginPath(); ctx.moveTo(...p[p.length - 2]); ctx.lineTo(...p[p.length - 1]); ctx.stroke(); e.preventDefault(); };
+    const end = () => { drawing = false; strokes = allStrokes.filter(s => s.length > 2).length; };
+    cv.onpointerdown = start; cv.onpointermove = move; cv.onpointerup = end; cv.onpointerleave = end;
+    $("#undo").onclick = () => { allStrokes.pop(); redraw(); };
+    $("#clr").onclick = () => { allStrokes.length = 0; redraw(); };
+    function redraw() { ctx.clearRect(0, 0, cv.width, cv.height); for (const s of allStrokes) { ctx.beginPath(); s.forEach((p, i) => i ? ctx.lineTo(...p) : ctx.moveTo(...p)); ctx.stroke(); } strokes = allStrokes.filter(s => s.length > 2).length; }
+    $("#fin2").onclick = () => {
+      PARA_STATE.raw = { score: 0, max: cfg.items, reviewed: false, strokes };
+      resultView("作答已保存", ["您的作答已提交，医生将进行要素复核评分。"], paraDone);
+    };
+  },
+};
+RUNNER.CDT = RUNNER.canvas; RUNNER.COPY = RUNNER.canvas;
+
+/* ---------- 训练执行（引擎实现见 games.js：24方案逐项引擎） ---------- */
+/* 图标统一由 /icons.js 提供（hsIcon(code)），不再使用 emoji；
+   games.js 内部仍按 ICONS[code] 取图标 HTML，这里把全局 ICONS 指到 SVG 代理，保持引擎零改动 */
+window.ICONS = window.hsIcons;
+let TRAIN = null;
+async function trainView(planId, program) {
+  await ensureBanks();
+  SHELL.title = "训练中"; SHELL.tab = "tasks"; SHELL.back = "#/tasks";
+  const s = await API.post("/train/start", { planId, program });
+  TRAIN = { planId, program, level: s.level, params: s.params, trials: [], hinted: 0, startAt: Date.now(), session: s };
+  Games.run(TRAIN);
+}
+const HUD = (extra = "") => `<div class="hud"><span class="hud-ico">${hsIcon(TRAIN.program)}</span><span>第 <b>${TRAIN.level}</b> 关</span>
+  <span>答对 <b id="score">0</b> 题</span>${extra}
+  <span style="margin-left:auto"><button class="pbtn sm" onclick="useHint()">提示</button>
+  <button class="pbtn sm" onclick="location.hash='#/tasks'">休息</button></span></div>`;
+let hintLevel = 0;
+function useHint() { hintLevel = Math.min(hintLevel + 1, 3); toast("提示已显示（本关正确率将按80%折算）", true); const h = $("#hintbox"); if (h) h.textContent = ["", "提示：请再听一遍规则讲解。", "提示：示范演示——按题目要求先试一次。", "提示：可以排除一个明显错误的选项。"][hintLevel]; if (hintLevel >= 2) speak("提示，" + ($("#hintbox") ? $("#hintbox").textContent : "")); }
+function recordTrial(correct, rt, miss = false) { TRAIN.trials.push({ correct: !!correct, rt: Math.round(rt || 0), hinted: hintLevel > 0, miss }); const n = TRAIN.trials.filter(t => t.correct).length; if ($("#score")) $("#score").textContent = n; if ($("#star")) $("#star").textContent = n; }
+
+/* ---------- 结算页（P6） ---------- */
+function settleView(r) {
+  SHELL.title = "本关结算"; SHELL.tab = "tasks"; SHELL.back = "";
+  const stars = r.result === "优秀" ? 3 : r.result === "通过" ? 2 : 1;
+  const msg = r.adjust === "跳升1关" ? "连升2关，太棒了！" : r.adjust === "升1关" ? "通过，进入下一关！" :
+    r.adjust === "降1关" ? "连续未通过，退回上一关再练练" : r.adjust === "保底第1关" ? "别灰心，我们回到第1关" :
+    r.adjust === "医生锁定" ? "难度已由医生固定" : "再接再厉！";
+  pad(`<div class="pcard center" style="padding:22px 16px">
+      <div class="result-star">${"⭐".repeat(stars)}${"☆".repeat(3 - stars)}</div>
+      <div style="font-size:17px;font-weight:600">${msg}</div>
+      <div style="width:100%;margin-top:4px">
+        ${[["本关正确率", r.accPct + "%"], ["平均反应时", r.avgRt + " ms"], ["使用提示", r.hinted + " 次"]]
+          .map(([k, v]) => `<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--c-line);font-size:14px">
+            <span style="color:var(--c-text-3)">${k}</span><b class="num">${v}</b></div>`).join("")}
+      </div>
+      <button class="pbtn primary xl" onclick="trainView(TRAIN.planId, TRAIN.program)">继续下一关</button>
+      <button class="pbtn xl" onclick="location.hash='#/tasks'">返回任务清单</button>
+      <div class="muted">训练记录已保存，医生端可实时查看</div>
+    </div>`);
+  setPad("本关结算");
+  speak(r.result === "未通过" ? "别灰心，我们继续努力" : "做得好，本关通过");
+}
+
+/* ---------- 训练记录（患者端第三页签，非诊断性） ---------- */
+async function recordsView() {
+  SHELL.title = "训练记录"; SHELL.tab = "records"; SHELL.back = "";
+  const d = await API.get("/my/records?size=60");
+  const rows = d.rows || [];
+  const done = d.week ? d.week.done : 0;
+  const target = d.week ? d.week.target : 0;
+  const pct = target ? Math.min(100, Math.round(done / target * 100)) : 0;
+  const fmt = (t) => {
+    const s = String(t || "");
+    const day = s.slice(0, 10), hm = s.slice(11, 16);
+    const today = new Date(); const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const y = new Date(Date.now() - 86400000); const ymdY = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, "0")}-${String(y.getDate()).padStart(2, "0")}`;
+    return (day === ymd ? "今天 " : day === ymdY ? "昨天 " : day.slice(5) + " ") + hm;
+  };
+  pad(`
+    <div class="pcard" style="padding:16px">
+      <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:10px">
+        <span style="font-size:15px;font-weight:600">本周训练</span>
+        <span class="muted" style="margin-left:auto;font-size:12.5px">${done}${target ? " / " + target : ""} 次</span>
+      </div>
+      <div style="height:8px;border-radius:99px;background:var(--c-surface-2);overflow:hidden">
+        <div style="height:100%;width:${pct}%;border-radius:99px;background:var(--c-primary);transition:width .4s"></div>
+      </div>
+      <div class="muted" style="margin-top:9px;font-size:12px;line-height:1.7">
+        ${target ? (done >= target ? "本周任务已完成，继续保持" : `还需完成 ${target - done} 次`) : "当前没有进行中的训练方案"}
+      </div>
+    </div>
+
+    <div class="pcard" style="padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;font-size:13.5px;padding:3px 0">
+        <span style="color:var(--c-text-3)">累计训练</span><span>${d.sessions ?? "—"} 次 · ${d.total} 项</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:13.5px;padding:3px 0">
+        <span style="color:var(--c-text-3)">已完成评估</span>
+        <span>${d.assessCount} 次${d.lastAssessAt ? " · 最近 " + String(d.lastAssessAt).slice(0, 10) : ""}</span>
+      </div>
+    </div>
+
+    <div class="psec"><span class="si">${hsIcon("CA-01")}</span>训练明细 <span class="cnt">${rows.length} 条</span></div>
+    <div class="pcard" style="padding:4px 14px">
+      ${rows.length ? rows.map(r => `
+        <div style="display:flex;align-items:center;gap:8px;padding:11px 0;border-bottom:1px solid var(--c-line);font-size:13px">
+          <span class="muted" style="width:76px;flex-shrink:0;font-size:12px">${fmt(r.created_at)}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.program)} · 第 ${r.level} 关</span>
+          <span class="muted" style="font-size:12px">${Math.round(r.acc * 100)}%</span>
+          <span style="font-size:11.5px;padding:1px 8px;border-radius:99px;flex-shrink:0;${r.result === "未通过" ? "background:var(--c-warning-soft);color:var(--c-warning)" : "background:var(--c-success-soft);color:var(--c-success)"}">${esc(r.result)}</span>
+        </div>`).join("") : `<div style="text-align:center;color:var(--c-text-3);font-size:13px;padding:18px 0">还没有训练记录，完成一次训练后会显示在这里</div>`}
+    </div>
+    <div class="muted" style="text-align:center;line-height:1.9">本页仅展示训练完成情况<br>评估结果请由医务人员解读</div>
+  `);
+  setPad("训练记录");
+}
+
+/* ---------- 题库生成器（mcq 类各方案） ---------- */
+const QGEN = {
+  "LA-01": (P) => {
+    const items = [["🦁", "狮子"], ["🐘", "大象"], ["🌳", "树"], ["✈️", "飞机"], ["⌚", "手表"], ["✏️", "铅笔"], ["🦒", "长颈鹿"], ["🐙", "章鱼"], ["🍄", "蘑菇"], ["🎸", "吉他"], ["🍍", "菠萝"], ["⚓", "锚"], ["🐐", "山羊"], ["🕯️", "蜡烛"], ["🔦", "手电筒"]];
+    return shuffle(items).slice(0, Math.min(P.n || 8, items.length)).map(([e, a]) => {
+      const wrong = shuffle(items.map(x => x[1]).filter(x => x !== a)).slice(0, (P.opts || 4) - 1);
+      return { media: e, big: 1, q: "请说出图中物品的名称", opts: shuffle([a, ...wrong]), a: 0, speak: "请说出图中物品的名称" };
+    }).map(q => ({ ...q, a: q.opts.indexOf(q.opts.find((o, i) => i === 0)) })).map((q, i, arr) => {
+      const ans = arr[i].opts[0]; const shuffledOpts = shuffle(q.opts); return { ...q, opts: shuffledOpts, a: shuffledOpts.indexOf(ans) };
+    });
+  },
+  "LA-03": (P) => {
+    const WG = [["🍎", "苹果"], ["🚌", "公交车"], ["⏰", "闹钟"], ["☂️", "雨伞"], ["🔑", "钥匙"], ["🎂", "蛋糕"], ["⚽", "足球"], ["🕯️", "蜡烛"]];
+    const SYN = [["开心", "快乐", "难过"], ["立刻", "马上", "缓慢"], ["美丽", "漂亮", "丑陋"], ["安静", "宁静", "喧闹"], ["帮助", "协助", "阻碍"], ["强壮", "结实", "瘦弱"]];
+    const ANT = [["高", "矮"], ["快", "慢"], ["大", "小"], ["白天", "黑夜"], ["热", "冷"], ["多", "少"]];
+    if (P.type === "wg") { const it = rnd(WG); const wrong = shuffle(WG.filter(w => w[1] !== it[1])).slice(0, (P.opts || 3) - 1);
+      return Array.from({ length: P.n || 8 }, () => { const t = rnd(WG); const ws = shuffle(WG.filter(w => w[1] !== t[1])).slice(0, (P.opts || 3) - 1);
+        return { media: t[0], q: "哪个词和图片相符？", opts: shuffle([t[1], ...ws.map(w => w[1])]), a: 0 }; }).map(fixA); }
+    if (P.type === "syn") { const t = rnd(SYN); return Array.from({ length: P.n || 8 }, () => { const x = rnd(SYN);
+      const ws = shuffle(SYN.flat().filter(w => w !== x[1] && w !== x[0])).slice(0, (P.opts || 2) - 1);
+      return { q: `“${x[0]}”的近义词是？`, opts: shuffle([x[1], ...ws]), a: 0 }; }).map(fixA); }
+    if (P.type === "ant") { return Array.from({ length: P.n || 8 }, () => { const x = rnd(ANT);
+      const ws = shuffle(ANT.flat().filter(w => w !== x[1] && w !== x[0])).slice(0, (P.opts || 2) - 1);
+      return { q: `“${x[0]}”的反义词是？`, opts: shuffle([x[1], ...ws]), a: 0 }; }).map(fixA); }
+    return Array.from({ length: P.n || 8 }, () => { const x = rnd(SYN); return { q: `“${x[0]}”的近义词是？`, opts: [x[1], "都不是"], a: 0 }; }).map(fixA);
+  },
+  "LA-04": (P) => {
+    const STEPS = [["请先把苹果放进篮子", "🍎→🧺", [["🍎→🧺", 1], ["🧺→🍎", 0]]],
+      ["先拍手，再指向门", "👏→🚪", [["👏→🚪", 1], ["🚪→👏", 0]]],
+      ["把笔放到桌上，然后把书拿起来", "🖊→📖", [["🖊→📖", 1], ["📖→🖊", 0]]],
+      ["不要指窗户，指一指地板", "🚫🪟→⬇", [["⬇", 1], ["🪟", 0]]],
+      ["先指天花板，再拍两下手，最后坐下", "👆→👏👏→🪑", [["👆→👏👏→🪑", 1], ["👏👏→🪑→👆", 0]]]];
+    return Array.from({ length: 6 }, (_, k) => { const s = STEPS[Math.min(k, STEPS.length - 1)];
+      return { q: "听指令：" + s[0], spoken: s[0], opts: shuffle(s[2].map(x => x[0])), a: s[2].findIndex(x => x[1] === 1), speak: s[0] }; }).map(fixA2);
+  },
+  "VP-01": (P) => {
+    const SH = ["▲▲", "◆◆", "■■", "●●", "★★"];
+    if (P.type === "same") return Array.from({ length: P.n || 8 }, () => { const same = Math.random() < 0.5; const s = rnd(SH);
+      return { q: "两个图形完全一样吗？", svg: `<div style="font-size:44px;letter-spacing:20px">${s}</div>`, opts: ["一样", "不一样"], a: same ? 0 : 1 }; });
+    if (P.type === "missing") return Array.from({ length: P.n || 8 }, () => { const s = rnd(["▲", "■", "●", "◆"]);
+      return { q: "残缺图形缺了哪一块？", svg: `<div style="font-size:60px">${s}</div>`, opts: [s, rnd(SH)], a: 0 }; }).map(fixA);
+    if (P.type === "overlap") return Array.from({ length: P.n || 6 }, () => { const k = P.k || 2; const s = shuffle(["▲", "●", "■", "◆"]).slice(0, k);
+      return { q: "重叠图形里有几种图形？", svg: `<div style="font-size:54px;opacity:.85">${s.join("")}</div>`, opts: ["2种", "3种", "4种"].slice(0, Math.max(2, k - 1)), a: Math.max(0, k - 2) }; }).map(fixA2);
+    return Array.from({ length: P.n || 8 }, () => ({ q: "两个图形完全一样吗？", svg: `<div style="font-size:44px;letter-spacing:20px">▲▲</div>`, opts: ["一样", "不一样"], a: 0 }));
+  },
+  "VP-02": (P) => Array.from({ length: 6 }, (_, k) => {
+    const n = 2 + ((k + TRAIN.level) % 5);
+    return { q: "图中共有几个方块？", svg: `<div style="font-size:12px">${"🧱".repeat(n)}</div>`, opts: ["2个", "3个", "4个", "5个", "6个"].slice(0, 4), a: Math.min(n, 4) - 2 };
+  }).map(fixA2),
+  "VP-03": (P) => {
+    const ROT = (deg) => `<div style="font-size:60px;display:inline-block;transform:rotate(${deg}deg)">R</div>`;
+    if (P.type === "route") { const seq = Array.from({ length: P.seg || 3 }, () => rnd(["⬆️", "➡️", "⬇️", "⬅️"]));
+      return [{ q: "先记住箭头顺序（3秒）", svg: `<div style="font-size:44px;letter-spacing:10px">${seq.join("")}</div>`, opts: ["记住了"], a: 0, speak: "" },
+        { q: "刚才第2个箭头是？", opts: shuffle(seq).slice(0, 3).concat([seq[1]]).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3), a: -1 }].map(x => ({ ...x, a: Math.max(0, x.opts.indexOf(seq[1])) })); }
+    if (P.type === "mirror") return Array.from({ length: 8 }, () => { const ok = Math.random() < 0.5;
+      return { q: "右边图形是左边图形的镜像吗？", svg: `<div style="font-size:54px"><span style="display:inline-block">${"⒭"}</span><span style="display:inline-block;transform:scaleX(-1)">${ok ? "⒭" : "⒭"}</span></div>`, opts: ["是镜像", "不是"], a: ok ? 0 : 1 }; });
+    return Array.from({ length: 8 }, () => { const deg = rnd([0, 90, 180, 270]); const same = Math.random() < 0.5;
+      return { q: `旋转${deg}°后与目标相同吗？`, svg: `<div style="font-size:54px">目标：R　作答：${ROT(deg)}</div>`, opts: ["相同", "不同"], a: 0 }; });
+  },
+  "SC-01": (P) => {
+    const EMO = { "开心": ["😊", "😄", "🙂"], "难过": ["😢", "😞", "☹️"], "生气": ["😠", "😡"], "害怕": ["😨", "😱"], "惊讶": ["😮", "😲"], "讨厌": ["🤢", "😤"] };
+    const ks = Object.keys(EMO).slice(0, P.k || 4);
+    return Array.from({ length: P.n || 8 }, () => { const a = rnd(ks); const wrong = shuffle(ks.filter(k => k !== a)).slice(0, Math.max(1, (P.k || 4) - 1));
+      return { media: rnd(EMO[a]), big: 1, q: "图中是什么情绪？", opts: shuffle([a, ...wrong]), a: 0 }; }).map(fixA);
+  },
+  "SC-02": (P) => {
+    const STORIES = [
+      ["小明把饼干藏在盒子里，然后出门了。妈妈把饼干移到了抽屉。小明回来后会去哪里找？", ["盒子里", "抽屉里"], 0],
+      ["小红看到小刚把玩具放到床下。小红走开后，小刚又把玩具放进了柜子。小红以为玩具在哪里？", ["床下", "柜子里"], 0],
+      ["下雨了，小丽没带伞，但她看起来很开心。为什么她可能开心？", ["喜欢下雨", "有人会来接她"], 1],
+      ["小华以为妈妈在厨房，其实妈妈在花园。小华想找妈妈，会先去哪里？", ["厨房", "花园"], 0],
+      ["老师夸奖小明的画很棒，小明脸红了。小明的心情是？", ["害羞/高兴", "生气"], 0],
+      ["小刚故意把沙子扔向小朋友，小朋友们会怎样想？", ["小刚这样做不对", "小刚在和我们玩"], 0],
+    ];
+    return shuffle(STORIES).slice(0, P.n || 6).map(([q, opts, a]) => ({ q, opts, a }));
+  },
+  "SC-03": (P) => {
+    const SC = [["在公交车上看到老人上车，最恰当的做法是？", ["主动让座", "继续玩手机", "把头转向窗外"], 0],
+      ["同学不小心碰掉了你的文具，你会？", ["说没关系，一起捡起来", "马上报告老师", "推他一下"], 0],
+      ["想借同桌的橡皮，最礼貌的说法是？", ["“请问可以借我用一下橡皮吗？”", "“把橡皮给我。”", "直接拿走"], 0],
+      ["到别人家做客，主人端来水果，应该？", ["道谢后适量取用", "全部吃完", "不吃并推倒盘子"], 0],
+      ["排队时有人插队，最恰当的做法是？", ["礼貌提醒“请大家排队”", "大声骂人", "默默离开"], 0],
+      ["朋友比赛输了很难过，你会？", ["安慰并鼓励他", "嘲笑他", "假装没看见"], 0]];
+    return shuffle(SC).slice(0, P.n || 6).map(([q, opts, a]) => ({ q, opts, a }));
+  },
+  "SC-04": (P) => {
+    const PRAG = [["“你可真行啊，又迟到了！”这句话的意思是？", ["批评迟到", "表扬他", "无关的话"], 0],
+      ["“他跑得像兔子一样快”是说什么？", ["跑得快", "养兔子", "害怕"], 0],
+      ["“这天气热得能把人烤熟”是说什么？", ["天气非常热", "真的会被烤", "在厨房"], 0],
+      ["朋友说“改天一定请你吃饭”，可能意思是？", ["客套话，不一定真的请", "明天一定请", "讨厌你"], 0],
+      ["“这个主意真是‘好’极了！”（说话人翻白眼）意思是？", ["这主意很糟糕", "主意真好", "没意见"], 0],
+      ["妈妈说“你看看几点了”，意思是？", ["该睡了/迟到了", "想让我看钟表工艺", "问时间"], 0]];
+    return shuffle(PRAG).slice(0, P.n || 6).map(([q, opts, a]) => ({ q, opts, a }));
+  },
+};
+function fixA(q) { const ans = q.opts[q.a]; q.opts = shuffle(q.opts); q.a = q.opts.indexOf(ans); return q; }
+function fixA2(q) { if (q.a < 0 || q.a >= q.opts.length) q.a = 0; return q; }
+
+/* ---------- 路由 ---------- */
+window.addEventListener("hashchange", route);
+async function route() {
+  const raw = location.hash.slice(2) || "";
+  const qi = raw.indexOf("?");
+  const path = qi >= 0 ? raw.slice(0, qi) : raw;
+  const qs = new URLSearchParams(qi >= 0 ? raw.slice(qi + 1) : "");
+  const [v, a, b] = path.split("/");
+  // 扫码入口：先用一次性票据换 token，再进入任务页
+  if (v === "sso") return ssoLogin(qs.get("t"));
+  if (v === "login" || !API.tk) return loginView();
+  // 离开训练页时作废引擎会话，避免旧定时器继续操作已移除的节点
+  if (v !== "train" && window.Games && Games.stop) Games.stop();
+  try {
+    if (!ME) await loadMe();
+    if (v === "tasks" || v === "" || v === "welcome") tasksView();
+    else if (v === "records" || v === "report") recordsView();
+    else if (v === "me") meView();
+    else if (v === "para") { await ensureBanks(); paraView(+a, b); }
+    else if (v === "train") trainView(+a, b);
+    else tasksView();
+  } catch (e) { toast(e.message, false); }
+}
+route();
+</script>
+<script src="/games.js"></script>
+</body></html>
