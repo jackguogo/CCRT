@@ -1,11 +1,11 @@
-# HS-CRT-01 体验版｜医生端单端上线
-# 用法：cd 到本目录后  docker compose up -d --build
+# HS-CRT-01 体验版｜医生端单端上线（镜像部署版）
+# 镜像由 GitHub Actions 构建并推送到 GHCR，服务器无需源码 / git / 编译工具。
+# 用法：把本文件放到任意目录后  docker compose pull && docker compose up -d
 # 本期只把医生端 3211 映射到宿主机 127.0.0.1，由宝塔 Nginx 反代对外。
 # 3210 / 3212 在容器内仍监听，但宿主机不可达，公网自然访问不到。
 services:
   app:
-    build:
-      context: .
+    image: ghcr.io/jackguogo/ccrt:latest
     container_name: hs-crt-01
     restart: unless-stopped
     environment:
