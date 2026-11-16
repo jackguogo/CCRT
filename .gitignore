@@ -17,3 +17,13 @@ HS-CRT-01-体验版/data/exports/
 
 # WorkBuddy 会话与记忆数据（非代码，不纳入版本库）
 .workbuddy-ai/
+
+# JWT 签名密钥与运行时数据：绝不入库
+**/data/secret.key
+**/data/*.db
+**/data/*.db-wal
+**/data/*.db-shm
+**/data/backups/
+**/data/exports/
+.env
+.env.local
